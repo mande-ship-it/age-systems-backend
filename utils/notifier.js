@@ -1,0 +1,301 @@
+const SibApiV3Sdk = require("sib-api-v3-sdk");
+
+// CHECK ENV VARIABLES
+if (!process.env.BREVO_API_KEY) {
+    console.log("❌ BREVO_API_KEY ENV VARIABLE MISSING");
+}
+
+// CONFIGURE BREVO CLIENT
+const defaultClient = SibApiV3Sdk.ApiClient.instance;
+const apiKey = defaultClient.authentications["api-key"];
+apiKey.apiKey = process.env.BREVO_API_KEY;
+
+const transactionalApi = new SibApiV3Sdk.TransactionalEmailsApi();
+
+console.log("✅ EMAIL SERVICE READY (Brevo)");
+
+/**
+ * HELPER: SEND EMAIL VIA BREVO
+ */
+const sendEmail = async ({ to, subject, html }) => {
+    const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
+
+    // Ensure we use verified sender from .env
+    const senderEmail = process.env.EMAIL_FROM || "mande@ageafrica.org";
+    const senderName = process.env.SENDER_NAME || "AGE Africa SMS";
+
+    sendSmtpEmail.sender = {
+        name: senderName,
+        email: senderEmail,
+    };
+    sendSmtpEmail.to = [{ email: to }];
+    sendSmtpEmail.subject = subject;
+    sendSmtpEmail.htmlContent = html;
+
+    try {
+        const result = await transactionalApi.sendTransacEmail(sendSmtpEmail);
+        console.log(`✅ Email sent to ${to}:`, result.messageId);
+        return result;
+    } catch (error) {
+        console.error(`❌ Email error for ${to}:`, error.message);
+        // If it's a 401, the API key is likely invalid
+        if (error.status === 401) {
+            console.error("   Reason: Brevo API Key is invalid or expired.");
+        }
+        // If it's a 403, the sender might not be verified
+        if (error.status === 403) {
+            console.error(`   Reason: Sender email [${senderEmail}] is not verified in Brevo.`);
+        }
+        throw error;
+    }
+};
+
+/**
+ * COMMON HTML WRAPPER
+ */
+const htmlWrapper = (title, content) => `
+  <div style="
+    font-family: Arial, sans-serif;
+    padding: 20px;
+    background: #f4f4f4;
+  ">
+    <div style="
+      max-width: 600px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    ">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="color:#4C3C32; margin: 0;">
+          ${title}
+        </h2>
+      </div>
+
+      <div style="color: #333; line-height: 1.6;">
+        ${content}
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;"/>
+
+      <p style="font-size:12px;color:gray;text-align: center;">
+        AGE Africa - Scholar Management System
+      </p>
+    </div>
+  </div>
+`;
+
+/**
+ * SEND OTP EMAIL
+ */
+const sendOTP = async (user, otp, password) => {
+    const title = `Welcome ${user.full_name}`;
+    const content = `
+        <p>You have been assigned the role of <b>${user.role_name || 'User'}</b> in the AGE Africa Scholar Management System.</p>
+        <p>Your account has been created with the following credentials:</p>
+        <p><b>Username:</b> ${user.username}</p>
+        <p><b>Password:</b> ${password}</p>
+
+        <p>Please use the following One-Time Password (OTP) for your first-time login to activate your account:</p>
+        <div style="
+            font-size: 32px;
+            color: #E05B1C;
+            font-weight: bold;
+            letter-spacing: 5px;
+            text-align: center;
+            padding: 20px;
+            background: #FAF2DB;
+            border-radius: 8px;
+            margin: 20px 0;
+        ">
+          ${otp}
+        </div>
+        <p>This code is valid for <b>2 days</b>. If you did not expect this email, please ignore it.</p>
+    `;
+
+    try {
+        return await sendEmail({
+            to: user.email,
+            subject: 'Account Activation - Your First Login OTP',
+            html: htmlWrapper(title, content)
+        });
+    } catch (err) {
+        console.log("❌ SEND OTP EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+/**
+ * SEND WELCOME EMAIL (After activation)
+ */
+const sendWelcomeEmail = async ({ email, name, role }) => {
+    try {
+        await sendEmail({
+            to: email,
+            subject: "Welcome to AGE Africa - Account Activated",
+            html: htmlWrapper(
+                `Welcome ${name}`,
+                `
+                    <p>Your account has been successfully activated.</p>
+                    <p><b>Role:</b> ${role}</p>
+                    <p>You can now log in to the system and start managing scholar data.</p>
+                `
+            ),
+        });
+        return true;
+    } catch (err) {
+        console.log("❌ WELCOME EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+/**
+ * SEND PASSWORD RESET OTP
+ */
+const sendPasswordResetEmail = async ({ email, name, otp }) => {
+    try {
+        await sendEmail({
+            to: email,
+            subject: "Password Reset Request",
+            html: htmlWrapper(
+                `Password Reset`,
+                `
+                    <p>Hello ${name},</p>
+                    <p>We received a request to reset your password. Use the code below to proceed:</p>
+                    <div style="font-size:32px;color:#E05B1C;font-weight:bold;letter-spacing:5px;text-align:center;padding:20px;background:#f9f9f9;border-radius:8px;">
+                      ${otp}
+                    </div>
+                `
+            ),
+        });
+        return true;
+    } catch (err) {
+        console.log("❌ RESET EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+/**
+ * DUTY ASSIGNMENT EMAIL
+ */
+const sendDutyAssignmentEmail = async ({
+    email,
+    name,
+    officerId,
+    dutyType,
+    location,
+    week,
+    time,
+    shift,
+    task,
+}) => {
+    try {
+        const info = await sendEmail({
+            to: email,
+            subject: "New Duty Assignment",
+            html: htmlWrapper(
+                `Duty Assigned to ${name}`,
+                `
+          <p><b>User ID:</b> ${officerId}</p>
+          <p><b>Duty Type:</b> ${dutyType}</p>
+          <p><b>Location:</b> ${location}</p>
+          <p><b>Week:</b> ${week}</p>
+          <p><b>Shift:</b> ${shift}</p>
+          <p><b>Time:</b> ${time || "Not specified"}</p>
+          <hr/>
+          <p>${task || "No task description"}</p>
+        `
+            ),
+        });
+
+        console.log("✅ Duty email sent:", info.messageId);
+        return true;
+    } catch (err) {
+        console.log("❌ DUTY EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+/**
+ * SEND EVENT NOTIFICATION EMAIL
+ */
+const sendEventNotificationEmail = async ({ email, name, event }) => {
+    try {
+        await sendEmail({
+            to: email,
+            subject: `New Event: ${event.title}`,
+            html: htmlWrapper(
+                `New Event Announcement`,
+                `
+                    <p>Hello ${name},</p>
+                    <p>A new event has been scheduled in the Scholar Management System:</p>
+                    <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #9AB334;">
+                        <h3 style="margin-top: 0; color: #4C3C32;">${event.title}</h3>
+                        <p><b>Category:</b> ${event.category}</p>
+                        <p><b>Date:</b> ${new Date(event.eventDate).toDateString()}</p>
+                        <p><b>Time:</b> ${event.eventTime}</p>
+                        <p><b>Location:</b> ${event.location}</p>
+                        ${event.organizer ? `<p><b>Organized By:</b> ${event.organizer}</p>` : ''}
+                    </div>
+                    <p><b>Description:</b></p>
+                    <p>${event.description || 'No description provided.'}</p>
+                    <p>Please log in to the system for more details.</p>
+                `
+            ),
+        });
+        return true;
+    } catch (err) {
+        console.log("❌ EVENT NOTIFICATION EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+/**
+ * SEND INTERNSHIP ALLOCATION EMAIL
+ */
+const sendInternshipAllocationEmail = async ({
+    email,
+    name,
+    workplace,
+    location,
+    supervisor,
+    startDate,
+    endDate
+}) => {
+    try {
+        await sendEmail({
+            to: email,
+            subject: "Internship Allocation - AGE Africa",
+            html: htmlWrapper(
+                "Internship Placement Confirmed",
+                `
+                    <p>Congratulations ${name},</p>
+                    <p>You have been officially allocated an internship under AGE Africa at the following workplace:</p>
+                    <div style="background: #FAF2DB; padding: 15px; border-radius: 8px; border-left: 4px solid #E05B1C;">
+                        <h3 style="margin-top: 0; color: #4C3C32;">${workplace}</h3>
+                        <p><b>Location:</b> ${location || 'N/A'}</p>
+                        <p><b>Supervisor:</b> ${supervisor || 'N/A'}</p>
+                        <p><b>Duration:</b> ${startDate} to ${endDate || 'TBD'}</p>
+                    </div>
+                    <p>This internship is a key part of your transition and professional development. Please report to your supervisor on the starting date.</p>
+                    <p>Best regards,<br/><b>AGE Africa Program Management</b></p>
+                `
+            ),
+        });
+        return true;
+    } catch (err) {
+        console.log("❌ INTERNSHIP EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
+module.exports = {
+    sendEmail,
+    sendOTP,
+    sendWelcomeEmail,
+    sendPasswordResetEmail,
+    sendDutyAssignmentEmail,
+    sendEventNotificationEmail,
+    sendInternshipAllocationEmail
+};
