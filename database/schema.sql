@@ -71,10 +71,13 @@ CREATE TABLE users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seed an initial Administrator user for testing
--- Email: admin@ageafrica.org, Password: Password123!
+-- Seed initial Administrator users
+-- Default Admin -> Email: admin@ageafrica.org, Password: Password123!
+-- Personal Admin -> Email: edwardyoungshaba133@gmail.com, Password: Password123!
 INSERT INTO users (email, username, password_hash, role_id, department_id, full_name, phone)
-VALUES ('admin@ageafrica.org', 'admin', '$2b$10$Xy0f.8L.B3r4mP3pG5U7eOq/mK6.wEw.jU.v7v.v7v.v7v.v7v.v7', 1, 4, 'Edward Shaba', '+265888000000');
+VALUES
+('admin@ageafrica.org', 'admin', '$2b$10$Xy0f.8L.B3r4mP3pG5U7eOq/mK6.wEw.jU.v7v.v7v.v7v.v7v.v7', 1, 4, 'System Admin', '+265888000000'),
+('edwardyoungshaba133@gmail.com', 'edward', '$2b$10$Xy0f.8L.B3r4mP3pG5U7eOq/mK6.wEw.jU.v7v.v7v.v7v.v7v.v7', 1, 4, 'Edward Young Shaba', '+265888000000');
 
 -- 3. Schools Table
 CREATE TABLE schools (
