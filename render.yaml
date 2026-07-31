@@ -2,7 +2,7 @@ services:
   # 1. The Web Service (Node.js API)
   - type: web
     name: scholar-management-api
-    env: node
+    runtime: node
     plan: free
     buildCommand: npm install
     startCommand: node server.js
@@ -27,4 +27,3 @@ databases:
   - name: scholar-db
     plan: free
     databaseName: scholar_management
-    user: postgres
