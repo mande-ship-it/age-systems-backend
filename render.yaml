@@ -1,0 +1,30 @@
+services:
+  # 1. The Web Service (Node.js API)
+  - type: web
+    name: scholar-management-api
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_VERSION
+        value: 18.0.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: scholar-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BREVO_API_KEY
+        sync: false # Set this manually in Render Dashboard
+      - key: SENDER_EMAIL
+        sync: false # Set this manually in Render Dashboard
+      - key: SENDER_NAME
+        value: "AGE Africa SMS"
+
+databases:
+  # 2. The PostgreSQL Database
+  - name: scholar-db
+    plan: free
+    databaseName: scholar_management
+    user: postgres
