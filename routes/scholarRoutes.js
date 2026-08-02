@@ -27,7 +27,7 @@ router.get('/alumni', auth, getAlumni);
 
 // Scholar list and creation
 router.get('/', auth, getAllScholars);
-router.post('/', auth, authorize(['Administrator', 'Program Coordinator', 'Data Officer']), createScholarRules, validate, createScholar);
+router.post('/', auth, authorize(['Administrator', 'Program Coordinator', 'Data Officer', 'scholars.create']), createScholarRules, validate, createScholar);
 
 // Single scholar routes
 router.get('/:id', auth, getScholarById);

@@ -25,7 +25,7 @@ const initSchedulers = () => {
                     const emailPromises = users.map(user =>
                         sendEventNotificationEmail({
                             email: user.email,
-                            name: user.full_name,
+                            name: user.fullName,
                             event: {
                                 ...event,
                                 title: `REMINDER: ${event.title} (In 2 days)`
@@ -39,7 +39,7 @@ const initSchedulers = () => {
             }
 
             // Also run history cleanup daily
-            console.log('🧹 Cleaning up old event history (>7 days)...');
+            console.log('🧹 Cleaning up old event history (>2 days)...');
             const deleted = await Event.cleanupHistory();
             if (deleted.length > 0) {
                 console.log(`🗑️ Deleted ${deleted.length} expired history events.`);

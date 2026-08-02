@@ -20,9 +20,8 @@ const createScholarRules = [
         .notEmpty()
         .withMessage('Date of birth is required'),
     body('phone')
-        .trim()
-        .notEmpty()
-        .withMessage('Phone number is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('sex')
         .optional()
         .isIn(['Female', 'Male', 'Other'])
@@ -36,51 +35,40 @@ const createScholarRules = [
         .notEmpty()
         .withMessage('School name is required'),
     body('currentClass')
-        .if(body('academicYear').not().exists())
-        .trim()
-        .notEmpty()
-        .withMessage('Current class / Form is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('academicYear')
-        .if(body('currentClass').not().exists())
-        .trim()
-        .notEmpty()
-        .withMessage('Academic year is required (e.g. 2026/2027)'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('district')
-        .trim()
-        .notEmpty()
-        .withMessage('District is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('village')
-        .trim()
-        .notEmpty()
-        .withMessage('Home village is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('donor')
-        .trim()
-        .notEmpty()
-        .withMessage('Donor is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('startYear')
-        .trim()
-        .notEmpty()
-        .withMessage('Start year is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('endYear')
-        .trim()
-        .notEmpty()
-        .withMessage('End year is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('previousSchool')
-        .trim()
-        .notEmpty()
-        .withMessage('Previous school is required'),
+        .optional({ checkFalsy: true })
+        .trim(),
     body('programName')
         .if(body('schoolType').equals('University'))
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage('Program of study is required for university students')
 ];
 
 const updateScholarRules = [
     body('status')
         .optional()
-        .isIn(['Active', 'Inactive', 'Graduated', 'Suspended'])
-        .withMessage('Status must be Active, Inactive, Graduated, or Suspended'),
+        .isIn(['Active', 'Inactive', 'Graduated', 'Suspended', 'Alumni'])
+        .withMessage('Status must be Active, Inactive, Graduated, Suspended, or Alumni'),
     body('email')
         .optional({ checkFalsy: true })
         .isEmail()

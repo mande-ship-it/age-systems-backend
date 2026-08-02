@@ -6,6 +6,7 @@ const Attendance = require('../models/Attendance');
 const Internship = require('../models/Internship');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
+const mongoose = require('mongoose');
 
 /**
  * Get all scholars
@@ -13,7 +14,7 @@ const NotificationService = require('../utils/notificationService');
 const getAllScholars = async (req, res, next) => {
     try {
         const scholars = await Scholar.getAll();
-        return successResponse(res, scholars, 'Scholars retrieved successfully.');
+        return successResponse(res, scholars);
     } catch (err) {
         next(err);
     }
@@ -25,110 +26,77 @@ const getAllScholars = async (req, res, next) => {
 const getScholarById = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const scholar = await Scholar.findById(id);
-        if (!scholar) {
-            return errorResponse(res, 'Scholar not found.', 404);
-        }
+        const scholar = await Scholar.getById(id);
+
+        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
         // Fetch all related data in parallel
         const [results, documents, payments, attendance, internship] = await Promise.all([
-            AcademicResult.getByScholar(scholar.id),
-            Document.getByScholar(scholar.id),
-            Payment.getByScholar(scholar.id),
-            Attendance.getSummaryByScholar(scholar.id),
-            Internship.findByScholarId(scholar.id)
+            AcademicResult.find({ scholarId: scholar._id }).populate('subjectId'),
+            Document.find({ scholarId: scholar._id }),
+            Payment.find({ scholarId: scholar._id }),
+            Attendance.find({ scholarId: scholar._id }).populate('sessionId'),
+            Internship.findOne({ scholarId: scholar._id })
         ]);
 
-        // Calculate summary stats for the "Overview" and "Statistics" tabs
+        // Calculate summary stats
         let totalMarks = 0;
         let averageMark = 0;
         if (results.length > 0) {
-            totalMarks = results.reduce((sum, r) => sum + parseFloat(r.marks), 0);
+            totalMarks = results.reduce((sum, r) => sum + (r.marks || 0), 0);
             averageMark = totalMarks / results.length;
         }
 
         const fullProfile = {
-            ...scholar,
+            ...scholar.toObject(),
             academic_results: results,
             documents: documents,
             payments: payments,
-            attendance: attendance,
+            attendance_history: attendance,
             internship: internship,
             summary: {
                 average_mark: averageMark.toFixed(1),
                 total_subjects: results.length,
                 total_payments: payments.length,
-                attendance_rate: attendance.total_sessions > 0
-                    ? ((attendance.present / attendance.total_sessions) * 100).toFixed(1)
+                attendance_rate: attendance.length > 0
+                    ? ((attendance.filter(a => a.status === 'present').length / attendance.length) * 100).toFixed(1)
                     : "0.0"
             }
         };
 
-        return successResponse(res, fullProfile, 'Comprehensive scholar profile retrieved.');
+        return successResponse(res, fullProfile);
     } catch (err) {
         next(err);
     }
 };
 
 /**
- * Create a new scholar (Standing tracking only, no system user login)
+ * Create a new scholar
  */
 const createScholar = async (req, res, next) => {
     try {
-        const {
-            name, fullName, email, phone, sex, dob, schoolType, schoolName,
-            schoolId, currentClass, academicYear, programType, programName, startYear, endYear,
-            district, village, donor, sponsorId, previousSchool,
-            guardianName, guardianPhone, guardianEmail, guardianRelation, guardianOccupation
-        } = req.body;
+        const scholarData = { ...req.body };
 
-        const scholarName = name || fullName;
-        const scholarAcademicYear = currentClass || academicYear;
-
-        // Auto-resolve sponsorId if donor name is provided
-        let resolvedSponsorId = sponsorId;
-        if (!resolvedSponsorId && donor) {
-            const Sponsor = require('../models/Sponsor');
-            const sponsor = await Sponsor.getByName(donor);
-            if (sponsor) resolvedSponsorId = sponsor.id;
+        // Handle name mapping for frontend compatibility
+        if (scholarData.name && !scholarData.fullName) {
+            scholarData.fullName = scholarData.name;
         }
 
-        const finalSchoolId = schoolId ? parseInt(schoolId) : null;
-        const finalSponsorId = resolvedSponsorId ? parseInt(resolvedSponsorId) : null;
+        // Sync academicYear and currentClass
+        if (scholarData.currentClass && !scholarData.academicYear) {
+            scholarData.academicYear = scholarData.currentClass;
+        } else if (scholarData.academicYear && !scholarData.currentClass) {
+            scholarData.currentClass = scholarData.academicYear;
+        }
 
-        // Create scholar profile directly
-        const scholarProfile = await Scholar.create({
-            fullName: scholarName,
-            email: email || null,
-            schoolId: finalSchoolId,
-            sponsorId: finalSponsorId,
-            dob,
-            sex,
-            phone,
-            village,
-            district,
-            schoolType,
-            schoolName,
-            previousSchool,
-            programType,
-            programName,
-            startYear,
-            endYear,
-            donor,
-            academicYear: scholarAcademicYear,
-            guardianName,
-            guardianPhone,
-            guardianEmail,
-            guardianRelation,
-            guardianOccupation,
-            status: 'Pending' // New scholars require approval
-        });
+        const scholar = new Scholar(scholarData);
+        await scholar.save();
 
-        await NotificationService.notifyAll(`🎓 New Scholar registration pending: ${scholarName}`, 'info', req.user ? req.user.fullName : 'System');
+        // Return fully populated scholar for immediate frontend display
+        const populatedScholar = await Scholar.getById(scholar._id);
 
-        return successResponse(res, {
-            scholar: scholarProfile
-        }, 'Scholar registered for tracking successfully.', 201);
+        await NotificationService.notifyAll(`🎓 New Scholar registered: ${populatedScholar.fullName}`, 'success');
+        return successResponse(res, populatedScholar, 'Scholar registered successfully.', 201);
     } catch (err) {
         next(err);
     }
@@ -140,51 +108,21 @@ const createScholar = async (req, res, next) => {
 const updateScholar = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid Scholar ID.', 400);
 
-        const scholar = await Scholar.findById(id);
-        if (!scholar) {
-            return errorResponse(res, 'Scholar not found.', 404);
-        }
+        // Sanitize body to remove ID fields that shouldn't be updated directly
+        const updateData = { ...req.body };
+        delete updateData._id;
+        delete updateData.id;
+        delete updateData.scholarId;
+        delete updateData.scholar_id;
 
-        // Map frontend fields to DB fields
-        const mappedData = {};
-        if (updateData.fullName !== undefined) mappedData.fullName = updateData.fullName;
-        if (updateData.name !== undefined) mappedData.fullName = updateData.name;
-        if (updateData.email !== undefined) mappedData.email = updateData.email;
-        if (updateData.schoolId !== undefined) mappedData.schoolId = updateData.schoolId;
-        if (updateData.schoolName !== undefined) mappedData.schoolName = updateData.schoolName;
-        if (updateData.schoolType !== undefined) mappedData.schoolType = updateData.schoolType;
-        if (updateData.previousSchool !== undefined) mappedData.previousSchool = updateData.previousSchool;
-        if (updateData.sponsorId !== undefined) mappedData.sponsorId = updateData.sponsorId;
-        if (updateData.status !== undefined) mappedData.status = updateData.status;
+        const updatedScholar = await Scholar.findByIdAndUpdate(id, updateData, { new: true });
         
-        const updatedAcademicYear = updateData.currentClass !== undefined ? updateData.currentClass : updateData.academicYear;
-        if (updatedAcademicYear !== undefined) mappedData.academicYear = updatedAcademicYear;
+        if (!updatedScholar) return errorResponse(res, 'Scholar not found.', 404);
 
-        if (updateData.dob !== undefined) mappedData.dob = updateData.dob;
-        if (updateData.sex !== undefined) mappedData.sex = updateData.sex;
-        if (updateData.phone !== undefined) mappedData.phone = updateData.phone;
-        if (updateData.village !== undefined) mappedData.village = updateData.village;
-        if (updateData.district !== undefined) mappedData.district = updateData.district;
-        if (updateData.programType !== undefined) mappedData.programType = updateData.programType;
-        if (updateData.programName !== undefined) mappedData.programName = updateData.programName;
-        if (updateData.startYear !== undefined) mappedData.startYear = updateData.startYear;
-        if (updateData.endYear !== undefined) mappedData.endYear = updateData.endYear;
-        if (updateData.donor !== undefined) mappedData.donor = updateData.donor;
-
-        // Guardian details mapping
-        if (updateData.guardianName !== undefined) mappedData.guardianName = updateData.guardianName;
-        if (updateData.guardianPhone !== undefined) mappedData.guardianPhone = updateData.guardianPhone;
-        if (updateData.guardianEmail !== undefined) mappedData.guardianEmail = updateData.guardianEmail;
-        if (updateData.guardianRelation !== undefined) mappedData.guardianRelation = updateData.guardianRelation;
-        if (updateData.guardianOccupation !== undefined) mappedData.guardianOccupation = updateData.guardianOccupation;
-
-        const updatedScholar = await Scholar.update(id, mappedData);
-
-        await NotificationService.notifyAll(`📝 Scholar tracking updated: ${updatedScholar.full_name}`, 'info', req.user ? req.user.fullName : 'System');
-
-        return successResponse(res, updatedScholar, 'Scholar record updated successfully.');
+        await NotificationService.notifyAll(`📝 Scholar profile updated: ${updatedScholar.fullName}`, 'info');
+        return successResponse(res, updatedScholar);
     } catch (err) {
         next(err);
     }
@@ -196,16 +134,13 @@ const updateScholar = async (req, res, next) => {
 const approveScholar = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const scholar = await Scholar.findById(id);
-        if (!scholar) {
-            return errorResponse(res, 'Scholar not found.', 404);
-        }
+        if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid Scholar ID.', 400);
 
-        const approvedScholar = await Scholar.approve(id);
+        const updated = await Scholar.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
+        if (!updated) return errorResponse(res, 'Scholar not found.', 404);
 
-        await NotificationService.notifyAll(`✅ Scholar approved: ${approvedScholar.full_name}`, 'success', req.user ? req.user.fullName : 'System');
-
-        return successResponse(res, approvedScholar, 'Scholar approved successfully.');
+        await NotificationService.notifyAll(`✅ Scholar approved: ${updated.fullName}`, 'success');
+        return successResponse(res, updated);
     } catch (err) {
         next(err);
     }
@@ -217,17 +152,13 @@ const approveScholar = async (req, res, next) => {
 const deleteScholar = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const scholar = await Scholar.findById(id);
-        if (!scholar) {
-            return errorResponse(res, 'Scholar not found.', 404);
-        }
+        if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid Scholar ID.', 400);
 
-        const name = scholar.full_name;
-        await Scholar.delete(scholar.id);
+        const scholar = await Scholar.findByIdAndDelete(id);
+        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
-        await NotificationService.notifyAll(`🗑️ Scholar removed: ${name}`, 'warning', req.user ? req.user.fullName : 'System');
-
-        return successResponse(res, { id }, 'Scholar record deleted successfully.');
+        await NotificationService.notifyAll(`🗑️ Scholar removed: ${scholar.fullName}`, 'warning');
+        return successResponse(res, { id });
     } catch (err) {
         next(err);
     }
@@ -238,36 +169,38 @@ const deleteScholar = async (req, res, next) => {
  */
 const getScholarsBySchool = async (req, res, next) => {
     try {
-        const { schoolId, schoolName } = req.query;
-        if (!schoolId && !schoolName) {
-            return errorResponse(res, 'School ID or School Name is required.', 400);
-        }
-        const scholars = await Scholar.getBySchool(schoolId, schoolName);
-        return successResponse(res, scholars, 'Scholars retrieved for school.');
+        const { schoolId } = req.query;
+        const scholars = await Scholar.find({ schoolId }).sort({ fullName: 1 });
+        return successResponse(res, scholars);
     } catch (err) {
         next(err);
     }
 };
 
 /**
- * Get university scholars who have graduated
+ * Get university graduates (Pending internship allocation)
  */
 const getUniversityGraduates = async (req, res, next) => {
     try {
-        const graduates = await Scholar.getUniversityGraduates();
-        return successResponse(res, graduates, 'University graduates retrieved successfully.');
+        const graduates = await Scholar.find({
+            schoolType: 'University',
+            status: 'Graduated'
+        }).sort({ endYear: -1, fullName: 1 });
+        return successResponse(res, graduates);
     } catch (err) {
         next(err);
     }
 };
 
 /**
- * Get scholars who are now Alumni (Allocated internships)
+ * Get alumni (Allocated scholars)
  */
 const getAlumni = async (req, res, next) => {
     try {
-        const alumni = await Scholar.getAlumni();
-        return successResponse(res, alumni, 'Alumni records retrieved successfully.');
+        const alumni = await Scholar.find({ status: 'Alumni' })
+            .populate('schoolId sponsorId')
+            .sort({ endYear: -1, fullName: 1 });
+        return successResponse(res, alumni);
     } catch (err) {
         next(err);
     }
@@ -278,8 +211,15 @@ const getAlumni = async (req, res, next) => {
  */
 const getScholarStats = async (req, res, next) => {
     try {
-        const stats = await Scholar.getStats();
-        return successResponse(res, stats, 'Scholar statistics retrieved.');
+        const [total, active, graduated, university, secondary] = await Promise.all([
+            Scholar.countDocuments(),
+            Scholar.countDocuments({ status: 'Active' }),
+            Scholar.countDocuments({ status: 'Graduated' }),
+            Scholar.countDocuments({ schoolType: 'University' }),
+            Scholar.countDocuments({ schoolType: 'Secondary' })
+        ]);
+
+        return successResponse(res, { total, active, graduated, university, secondary });
     } catch (err) {
         next(err);
     }

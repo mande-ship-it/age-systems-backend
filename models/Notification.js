@@ -1,52 +1,33 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class Notification {
-    static async create({ userId, message, type = 'info', actorName = 'System' }) {
-        const sql = `
-            INSERT INTO notifications (user_id, message, type, actor_name)
-            VALUES ($1, $2, $3, $4)
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [userId, message, type, actorName]);
-        return result.rows[0];
-    }
+const notificationSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // null for broadcast
+    message: { type: String, required: true },
+    type: { type: String, default: 'info' }, // info, success, warning, error
+    actorName: { type: String, default: 'System' },
+    isRead: { type: Boolean, default: false }
+}, { timestamps: true });
 
-    static async getByUser(userId) {
-        const sql = `
-            SELECT * FROM notifications 
-            WHERE user_id = $1 OR user_id IS NULL
-            ORDER BY created_at DESC
-        `;
-        const result = await pool.query(sql, [userId]);
-        return result.rows;
-    }
+notificationSchema.statics.getByUser = function(userId) {
+    return this.find({
+        $or: [{ userId }, { userId: null }]
+    }).sort({ createdAt: -1 });
+};
 
-    static async markAsRead(id) {
-        const sql = `
-            UPDATE notifications 
-            SET is_read = TRUE 
-            WHERE id = $1 
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [id]);
-        return result.rows[0] || null;
-    }
+// Virtuals for frontend compatibility (PostgreSQL column names)
+notificationSchema.virtual('is_read').get(function() {
+    return this.isRead;
+});
 
-    static async markAllAsRead(userId) {
-        const sql = `
-            UPDATE notifications
-            SET is_read = TRUE
-            WHERE user_id = $1 OR user_id IS NULL
-        `;
-        const result = await pool.query(sql, [userId]);
-        return result.rowCount;
-    }
+notificationSchema.virtual('actor_name').get(function() {
+    return this.actorName;
+});
 
-    static async delete(id) {
-        const sql = 'DELETE FROM notifications WHERE id = $1 RETURNING id';
-        const result = await pool.query(sql, [id]);
-        return result.rows[0] || null;
-    }
-}
+notificationSchema.virtual('created_at').get(function() {
+    return this.createdAt;
+});
 
-module.exports = Notification;
+notificationSchema.set('toJSON', { virtuals: true });
+notificationSchema.set('toObject', { virtuals: true });
+
+module.exports = mongoose.model('Notification', notificationSchema);

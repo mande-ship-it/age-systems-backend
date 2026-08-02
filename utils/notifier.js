@@ -89,35 +89,46 @@ const htmlWrapper = (title, content) => `
 /**
  * SEND OTP EMAIL
  */
-const sendOTP = async (user, otp, password) => {
-    const title = `Welcome ${user.full_name}`;
-    const content = `
-        <p>You have been assigned the role of <b>${user.role_name || 'User'}</b> in the AGE Africa Scholar Management System.</p>
-        <p>Your account has been created with the following credentials:</p>
-        <p><b>Username:</b> ${user.username}</p>
-        <p><b>Password:</b> ${password}</p>
+const sendOTP = async (user, otp, password, roleName = null) => {
+    const name = user.fullName || user.full_name || 'User';
+    const role = roleName || user.role_name || 'Staff Member';
 
-        <p>Please use the following One-Time Password (OTP) for your first-time login to activate your account:</p>
+    const title = `Welcome ${name}`;
+    const content = `
+        <p>Your account for the <b>AGE Africa Scholar Management System</b> has been successfully provisioned.</p>
+
+        <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #4C3C32; margin: 20px 0;">
+            <p style="margin: 5px 0;"><b>Assigned Role:</b> ${role}</p>
+            <p style="margin: 5px 0;"><b>System Username:</b> ${user.username}</p>
+            <p style="margin: 5px 0;"><b>Temporary Password:</b> <span style="font-family: monospace; background: #eee; padding: 2px 4px;">${password}</span></p>
+        </div>
+
+        <p>To finalize your registration and secure your account, please use the following <b>One-Time Password (OTP)</b> for your initial login. You will be prompted to create a new permanent password immediately.</p>
+
         <div style="
             font-size: 32px;
             color: #E05B1C;
             font-weight: bold;
             letter-spacing: 5px;
             text-align: center;
-            padding: 20px;
+            padding: 25px;
             background: #FAF2DB;
-            border-radius: 8px;
-            margin: 20px 0;
+            border-radius: 12px;
+            margin: 25px 0;
+            border: 1px dashed #E05B1C;
         ">
           ${otp}
         </div>
-        <p>This code is valid for <b>2 days</b>. If you did not expect this email, please ignore it.</p>
+
+        <p style="font-size: 13px; color: #666;">
+            <b>Security Note:</b> This access code expires in 48 hours. If you did not request this account, please contact the IT Department immediately.
+        </p>
     `;
 
     try {
         return await sendEmail({
             to: user.email,
-            subject: 'Account Activation - Your First Login OTP',
+            subject: 'System Access Provisioned - Initial Login Credentials',
             html: htmlWrapper(title, content)
         });
     } catch (err) {

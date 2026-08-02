@@ -9,7 +9,8 @@ const {
     getSubjectRegistry,
     createSubject,
     deleteSubject,
-    checkResultCompleteness
+    checkResultCompleteness,
+    getSchoolsWithResults
 } = require('../controllers/academicController');
 
 const { recordResultsRules, createSubjectRules } = require('../validations/academicValidation');
@@ -28,23 +29,7 @@ router.get('/scholar/:scholarId', getScholarResults);
 router.get('/stats/:year', getYearlyStats);
 
 // School lookup for results view
-router.get('/schools-with-results', async (req, res, next) => {
-    try {
-        const pool = require('../config/database');
-        const sql = `
-            SELECT DISTINCT COALESCE(sch.name, s.school_name) as name
-            FROM academic_results r
-            JOIN scholars s ON r.scholar_id = s.id
-            LEFT JOIN schools sch ON s.school_id = sch.id
-            ORDER BY name ASC
-        `;
-        const result = await pool.query(sql);
-        const { successResponse } = require('../utils/response');
-        return successResponse(res, result.rows, 'Schools with academic results retrieved.');
-    } catch (err) {
-        next(err);
-    }
-});
+router.get('/schools-with-results', getSchoolsWithResults);
 
 // Subject Registry
 router.get('/subjects', getSubjectRegistry);

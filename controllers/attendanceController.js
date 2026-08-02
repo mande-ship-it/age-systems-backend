@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const AttendanceSession = require('../models/AttendanceSession');
 const Attendance = require('../models/Attendance');
 const { successResponse, errorResponse } = require('../utils/response');
@@ -8,9 +9,22 @@ const NotificationService = require('../utils/notificationService');
  */
 const recordSession = async (req, res, next) => {
     try {
-        const session = await AttendanceSession.create(req.body);
+        const { entries, ...sessionData } = req.body;
 
-        await NotificationService.notifyAll(`📋 Attendance recorded: ${req.body.sessionType} at ${req.body.schoolName || 'Institution'}`, 'info', req.user ? req.user.fullName : 'System');
+        const session = new AttendanceSession(sessionData);
+        await session.save();
+
+        if (entries && entries.length > 0) {
+            const attendanceEntries = entries.map(e => ({
+                sessionId: session._id,
+                scholarId: e.scholarId,
+                status: e.status,
+                notes: e.notes
+            }));
+            await Attendance.insertMany(attendanceEntries);
+        }
+
+        await NotificationService.notifyAll(`📋 Attendance recorded at ${req.body.schoolName || 'Institution'}`, 'info');
 
         return successResponse(res, session, 'Attendance register saved successfully.', 201);
     } catch (err) {
@@ -18,83 +32,123 @@ const recordSession = async (req, res, next) => {
     }
 };
 
-/**
- * Get attendance history with filters
- */
 const getHistory = async (req, res, next) => {
     try {
-        const { type, schoolId, schoolName, month, week_number, term, semester } = req.query;
-        const history = await AttendanceSession.getAll({
-            type,
-            schoolId,
-            schoolName,
-            month,
-            week_number,
-            term,
-            semester
-        });
-        return successResponse(res, history, 'Attendance history retrieved.');
+        const history = await AttendanceSession.getAll(req.query);
+
+        // Add present/total counts for each session
+        const enrichedHistory = await Promise.all(history.map(async (s) => {
+            const counts = await Attendance.aggregate([
+                { $match: { sessionId: s._id } },
+                { $group: {
+                    _id: null,
+                    present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+                    total: { $sum: 1 }
+                }}
+            ]);
+
+            return {
+                ...s.toObject(),
+                present_count: counts.length > 0 ? counts[0].present : 0,
+                total_count: counts.length > 0 ? counts[0].total : 0
+            };
+        }));
+
+        return successResponse(res, enrichedHistory, 'Attendance history retrieved.');
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Get session details by ID
- */
 const getSessionById = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const session = await AttendanceSession.findById(id);
-        if (!session) {
-            return errorResponse(res, 'Attendance session not found.', 404);
-        }
-        return successResponse(res, session, 'Session details retrieved.');
+        const session = await AttendanceSession.findById(id).populate('schoolId');
+        if (!session) return errorResponse(res, 'Session not found.', 404);
+
+        const entries = await Attendance.find({ sessionId: id })
+            .populate({
+                path: 'scholarId',
+                select: 'fullName scholarId academicYear'
+            });
+
+        return successResponse(res, {
+            ...session.toObject(),
+            entries
+        });
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Get Attendance Analytics / Reports
- */
 const getAttendanceAnalytics = async (req, res, next) => {
     try {
-        const [stats, trends, summary, alerts] = await Promise.all([
-            Attendance.getGlobalStats(),
-            Attendance.getMonthlyTrends(),
-            Attendance.getSchoolWiseSummary(),
-            Attendance.getAlerts()
+        const stats = await Attendance.aggregate([
+            { $group: {
+                _id: "$status",
+                count: { $sum: 1 }
+            }}
+        ]);
+
+        const trends = await AttendanceSession.aggregate([
+            { $lookup: {
+                from: 'attendances',
+                localField: '_id',
+                foreignField: 'sessionId',
+                as: 'logs'
+            }},
+            { $unwind: "$logs" },
+            { $group: {
+                _id: { $dateToString: { format: "%Y-%U", date: "$sessionDate" } },
+                rate: { $avg: { $cond: [{ $eq: ["$logs.status", "present"] }, 100, 0] } }
+            }},
+            { $sort: { "_id": 1 } },
+            { $limit: 4 }
         ]);
 
         return successResponse(res, {
-            stats,
-            trends,
-            summary,
-            alerts
-        }, 'Attendance analytics retrieved.');
+            stats: stats.reduce((acc, curr) => { acc[curr._id] = curr.count; return acc; }, { total: stats.reduce((s, c) => s + c.count, 0) }),
+            trends: trends.map(t => ({ week_start: t._id, attendance_rate: t.rate })),
+            summary: [], // Simplified for now
+            alerts: []
+        });
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Get detailed report for a school with targets
- */
 const getSchoolAttendanceReport = async (req, res, next) => {
+    // Simplified version of the complex SQL report
     try {
         const { schoolId } = req.params;
-        const { month, term, semester, week_number, year } = req.query;
+        const report = await Attendance.aggregate([
+            { $lookup: { from: 'attendancesessions', localField: 'sessionId', foreignField: '_id', as: 'session' } },
+            { $unwind: "$session" },
+            { $match: { "session.schoolId": new mongoose.Types.ObjectId(schoolId) } },
+            { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
+            { $unwind: "$scholar" },
+            { $match: { "scholar.status": "Active" } },
+            { $group: {
+                _id: "$scholarId",
+                scholar_name: { $first: "$scholar.fullName" },
+                age_id: { $first: "$scholar.scholarId" },
+                present_count: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+                total_sessions: { $sum: 1 }
+            }},
+            { $addFields: {
+                target: "$total_sessions",
+                attendanceRate: {
+                    $cond: [
+                        { $eq: ["$total_sessions", 0] },
+                        0,
+                        { $round: [{ $multiply: [{ $divide: ["$present_count", "$total_sessions"] }, 100] }, 0] }
+                    ]
+                }
+            }},
+            { $sort: { scholar_name: 1 } }
+        ]);
 
-        const report = await Attendance.getReportBySchool(schoolId, {
-            month,
-            term,
-            semester,
-            week_number,
-            year
-        });
-
-        return successResponse(res, report, 'School attendance report generated.');
+        return successResponse(res, report);
     } catch (err) {
         next(err);
     }

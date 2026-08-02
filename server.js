@@ -6,7 +6,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const pool = require('./config/database');
+const connectDB = require('./config/database');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -34,7 +34,7 @@ const { initSchedulers } = require('./utils/scheduler');
 const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
-app.set('etag', false); // Disable ETag to prevent 304 errors in Flutter/Dio without cache
+app.set('etag', false);
 const path = require('path');
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -48,7 +48,6 @@ const io = new Server(server, {
 });
 const PORT = process.env.PORT || 5000;
 
-// Make io accessible globally
 global.io = io;
 
 io.on('connection', (socket) => {
@@ -64,7 +63,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// Middleware
 app.use(cors());
 app.use(helmet({
     contentSecurityPolicy: false,
@@ -74,11 +72,9 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static Files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
-// Home Route
 app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
@@ -87,7 +83,6 @@ app.get('/', (req, res) => {
     });
 });
 
-// API Routes Mounting
 app.use('/api/auth', authRoutes);
 app.use('/api/scholars', scholarRoutes);
 app.use('/api/attendance', attendanceRoutes);
@@ -106,25 +101,15 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/internships', internshipRoutes);
 app.use('/api/departments', departmentRoutes);
 
-// Global Error Handler
 app.use(errorHandler);
 
-// Test DB connection, then start server
-pool.query('SELECT NOW()', (err, res) => {
-    if (err) {
-        console.error('❌ Database connection failed:', err.message);
-    } else {
-        console.log(' Database connected at:', res.rows[0].now);
-    }
-
+// Connect to MongoDB then start server
+connectDB().then(() => {
     server.listen(PORT, '0.0.0.0', () => {
-        // Initialize Schedulers
         initSchedulers();
-
         console.log('--------------------------------------------------');
         console.log('Scholar Management System Backend API Server');
         console.log(`Server running on http://localhost:${PORT}`);
-        console.log(`Accessible on your network at http://<your-ip>:${PORT}`);
         console.log('--------------------------------------------------');
     });
 });

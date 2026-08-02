@@ -1,49 +1,55 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class Internship {
-    static async create({ scholarId, workplaceName, location, supervisor, startDate, endDate, details }) {
-        const sql = `
-            INSERT INTO internships (scholar_id, workplace_name, location, supervisor, start_date, end_date, details)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [scholarId, workplaceName, location, supervisor, startDate, endDate, details]);
-        return result.rows[0];
+const internshipSchema = new mongoose.Schema({
+    scholarId: { type: mongoose.Schema.Types.ObjectId, ref: 'Scholar', required: true, unique: true },
+    workplaceName: { type: String, required: true },
+    location: { type: String },
+    supervisor: { type: String },
+    startDate: { type: Date, default: Date.now },
+    endDate: { type: Date },
+    status: { type: String, default: 'Active' }, // Active, Completed
+    details: { type: String }
+}, { timestamps: true });
+
+internshipSchema.statics.getAll = function() {
+    return this.find().populate('scholarId').sort({ createdAt: -1 });
+};
+
+internshipSchema.statics.autoProcessCompletions = async function() {
+    const now = new Date();
+    const completions = await this.find({
+        status: 'Active',
+        endDate: { $lte: now }
+    });
+
+    if (completions.length > 0) {
+        await this.updateMany(
+            { _id: { $in: completions.map(c => c._id) } },
+            { status: 'Completed' }
+        );
     }
 
-    static async getAll() {
-        const sql = `
-            SELECT i.*, s.full_name as scholar_name, s.scholar_id as age_id, s.email as scholar_email
-            FROM internships i
-            JOIN scholars s ON i.scholar_id = s.id
-            ORDER BY i.created_at DESC
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
+    return completions;
+};
 
-    static async findByScholarId(scholarId) {
-        const result = await pool.query('SELECT * FROM internships WHERE scholar_id = $1', [scholarId]);
-        return result.rows[0] || null;
-    }
+// Virtuals for frontend compatibility (snake_case)
+internshipSchema.virtual('scholar_name').get(function() {
+    return this.scholarId ? (this.scholarId.fullName || this.scholarId.full_name) : 'N/A';
+});
 
-    static async updateStatus(id, status) {
-        const result = await pool.query('UPDATE internships SET status = $1 WHERE id = $2 RETURNING *', [status, id]);
-        return result.rows[0];
-    }
+internshipSchema.virtual('workplace_name').get(function() {
+    return this.workplaceName;
+});
 
-    static async autoProcessCompletions() {
-        // Marks internships as 'Completed' if the end_date has passed
-        const sql = `
-            UPDATE internships
-            SET status = 'Completed'
-            WHERE status = 'Active'
-            AND end_date < CURRENT_DATE
-            RETURNING id, scholar_id
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
-}
+internshipSchema.virtual('start_date').get(function() {
+    return this.startDate;
+});
 
-module.exports = Internship;
+internshipSchema.virtual('end_date').get(function() {
+    return this.endDate;
+});
+
+internshipSchema.set('toJSON', { virtuals: true });
+internshipSchema.set('toObject', { virtuals: true });
+
+module.exports = mongoose.model('Internship', internshipSchema);

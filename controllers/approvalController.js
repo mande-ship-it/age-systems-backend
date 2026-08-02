@@ -32,10 +32,15 @@ const getPendingActivities = async (req, res, next) => {
 const approveActivity = async (req, res, next) => {
     try {
         const { type, id } = req.params;
+        const userRole = req.user?.role || '';
         let result;
 
         switch (type.toLowerCase()) {
             case 'scholar':
+                // Role check: Only Admin, Country Director, and Program Coordinator/Manager can approve scholars
+                if (!['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole)) {
+                    return errorResponse(res, 'You do not have permission to approve scholars.', 403);
+                }
                 result = await Scholar.approve(id);
                 if (result) {
                     await NotificationService.notifyAll(`🎓 Scholar approved: ${result.full_name || 'New Scholar'}`, 'success', req.user?.fullName);
@@ -71,10 +76,15 @@ const approveActivity = async (req, res, next) => {
 const rejectActivity = async (req, res, next) => {
     try {
         const { type, id } = req.params;
+        const userRole = req.user?.role || '';
         let result;
 
         switch (type.toLowerCase()) {
             case 'scholar':
+                // Role check: Only Admin, Country Director, and Program Coordinator/Manager can reject scholars
+                if (!['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole)) {
+                    return errorResponse(res, 'You do not have permission to reject scholars.', 403);
+                }
                 const scholar = await Scholar.findById(id);
                 result = await Scholar.delete(id);
                 if (result && scholar) {

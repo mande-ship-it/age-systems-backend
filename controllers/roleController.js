@@ -1,4 +1,5 @@
 const Role = require('../models/Role');
+const { PERMISSION_GROUPS } = require('../utils/permissions');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
@@ -13,6 +14,17 @@ const getAllRoles = async (req, res, next) => {
         return successResponse(res, roles, 'Roles retrieved successfully.');
     } catch (err) {
         console.error('Error in getAllRoles:', err);
+        next(err);
+    }
+};
+
+/**
+ * Get all available permission groups
+ */
+const getPermissionGroups = async (req, res, next) => {
+    try {
+        return successResponse(res, PERMISSION_GROUPS, 'Permission groups retrieved.');
+    } catch (err) {
         next(err);
     }
 };
@@ -91,6 +103,7 @@ const updatePermissions = async (req, res, next) => {
 
 module.exports = {
     getAllRoles,
+    getPermissionGroups,
     createRole,
     updateRole,
     deleteRole,

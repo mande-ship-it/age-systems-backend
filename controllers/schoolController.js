@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const School = require('../models/School');
 const Scholar = require('../models/Scholar');
 const AcademicResult = require('../models/AcademicResult');
@@ -9,20 +10,24 @@ const NotificationService = require('../utils/notificationService');
  */
 const createSchool = async (req, res, next) => {
     try {
-        const { code, name } = req.body;
+        const { code, name, postal } = req.body;
+
+        const schoolData = { ...req.body };
+        if (postal && !schoolData.postalAddress) schoolData.postalAddress = postal;
 
         if (code) {
-            const existingSchool = await School.findByCode(code);
+            const existingSchool = await School.findOne({ code });
             if (existingSchool) {
-                // If school exists, update it or just return it
-                const updated = await School.update(existingSchool.id, req.body);
-                await NotificationService.notifyAll(`🏫 School updated: ${name || code}`, 'info', req.user ? req.user.fullName : 'System');
+                const updated = await School.findByIdAndUpdate(existingSchool._id, schoolData, { new: true });
+                await NotificationService.notifyAll(`🏫 School updated: ${name || code}`, 'info');
                 return successResponse(res, updated, 'School updated (already existed).', 201);
             }
         }
 
-        const school = await School.create(req.body);
-        await NotificationService.notifyAll(`🏫 New school registered: ${name || code}`, 'success', req.user ? req.user.fullName : 'System');
+        const school = new School(schoolData);
+        await school.save();
+
+        await NotificationService.notifyAll(`🏫 New school registered: ${name || code}`, 'success');
         return successResponse(res, school, 'School created successfully.', 201);
     } catch (err) {
         next(err);
@@ -31,7 +36,7 @@ const createSchool = async (req, res, next) => {
 
 const getAllSchools = async (req, res, next) => {
     try {
-        const schools = await School.getAll();
+        const schools = await School.find().sort({ name: 1 });
         return successResponse(res, schools, 'Schools list retrieved.');
     } catch (err) {
         next(err);
@@ -42,12 +47,14 @@ const getSchoolById = async (req, res, next) => {
     try {
         const { id } = req.params;
         const school = await School.findById(id);
-        if (!school) {
-            return errorResponse(res, 'School not found.', 404);
-        }
+        if (!school) return errorResponse(res, 'School not found.', 404);
 
-        const stats = await School.getStats(id);
-        const schoolWithStats = { ...school, stats };
+        const scholarCount = await Scholar.countDocuments({ schoolId: id });
+
+        const schoolWithStats = {
+            ...school.toObject(),
+            stats: { totalScholars: scholarCount }
+        };
 
         return successResponse(res, schoolWithStats, 'School details retrieved.');
     } catch (err) {
@@ -58,13 +65,16 @@ const getSchoolById = async (req, res, next) => {
 const updateSchool = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const school = await School.findById(id);
-        if (!school) {
-            return errorResponse(res, 'School not found.', 404);
-        }
+        if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid School ID.', 400);
 
-        const updated = await School.update(id, req.body);
-        await NotificationService.notifyAll(`🏫 School updated: ${updated.name || updated.code}`, 'info', req.user ? req.user.fullName : 'System');
+        const schoolData = { ...req.body };
+        if (req.body.postal && !schoolData.postalAddress) schoolData.postalAddress = req.body.postal;
+
+        const updated = await School.findByIdAndUpdate(id, schoolData, { new: true });
+
+        if (!updated) return errorResponse(res, 'School not found.', 404);
+
+        await NotificationService.notifyAll(`🏫 School updated: ${updated.name || updated.code}`, 'info');
         return successResponse(res, updated, 'School updated successfully.');
     } catch (err) {
         next(err);
@@ -74,12 +84,10 @@ const updateSchool = async (req, res, next) => {
 const deleteSchool = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const school = await School.findById(id);
-        if (!school) {
-            return errorResponse(res, 'School not found.', 404);
-        }
-        await School.delete(id);
-        await NotificationService.notifyAll(`🗑️ School deleted: ${school.name || school.code}`, 'warning', req.user ? req.user.fullName : 'System');
+        const school = await School.findByIdAndDelete(id);
+        if (!school) return errorResponse(res, 'School not found.', 404);
+
+        await NotificationService.notifyAll(`🗑️ School deleted: ${school.name || school.code}`, 'warning');
         return successResponse(res, { id }, 'School deleted successfully.');
     } catch (err) {
         next(err);
@@ -89,11 +97,13 @@ const deleteSchool = async (req, res, next) => {
 const toggleSchoolStatus = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const updated = await School.toggleStatus(id);
-        if (!updated) {
-            return errorResponse(res, 'School not found.', 404);
-        }
-        return successResponse(res, updated, `School status changed to ${updated.status}.`);
+        const school = await School.findById(id);
+        if (!school) return errorResponse(res, 'School not found.', 404);
+
+        school.status = school.status === 'Active' ? 'Inactive' : 'Active';
+        await school.save();
+
+        return successResponse(res, school, `School status changed to ${school.status}.`);
     } catch (err) {
         next(err);
     }
@@ -102,33 +112,26 @@ const toggleSchoolStatus = async (req, res, next) => {
 /**
  * Scholar Progression / Promotion Logic
  */
-
-/**
- * Get scholars by school for promotion review
- * This matches the logic in PromoteScholarsComponent
- */
 const getScholarsForPromotion = async (req, res, next) => {
     try {
-        const { schoolId, schoolName, year } = req.query;
+        const { schoolId, year } = req.query;
 
-        // Fetch scholars belonging to this school
-        const scholars = await Scholar.getBySchool(schoolId, schoolName);
+        const scholars = await Scholar.find({ schoolId });
 
-        // For each scholar, calculate their average for the selected year to see if they "Passed"
         const scholarsWithStatus = await Promise.all(scholars.map(async (scholar) => {
-            const results = await AcademicResult.getByScholar(scholar.id, year);
+            const results = await AcademicResult.find({ scholarId: scholar._id, year });
 
             let average = 0;
             let passed = false;
 
             if (results.length > 0) {
-                const totalMarks = results.reduce((sum, r) => sum + parseFloat(r.marks), 0);
+                const totalMarks = results.reduce((sum, r) => sum + (r.marks || 0), 0);
                 average = totalMarks / results.length;
-                passed = average >= 50; // Pass mark defined in frontend
+                passed = average >= 50;
             }
 
             return {
-                ...scholar,
+                ...scholar.toObject(),
                 average_marks: average.toFixed(1),
                 passed: passed,
                 can_promote: passed
@@ -141,52 +144,42 @@ const getScholarsForPromotion = async (req, res, next) => {
     }
 };
 
-/**
- * Promote a single scholar
- * Implements the nextClass logic from the frontend
- */
 const promoteScholar = async (req, res, next) => {
     try {
         const { id } = req.params;
         const scholar = await Scholar.findById(id);
 
-        if (!scholar) {
-            return errorResponse(res, 'Scholar not found.', 404);
-        }
+        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
-        const currentClass = scholar.academic_year;
+        const currentClass = scholar.academicYear;
         let nextClass = currentClass;
 
-        // Logic from Flutter PromoteScholarsComponent
-        if (scholar.school_type === 'Secondary') {
+        if (scholar.schoolType === 'Secondary') {
             if (currentClass.startsWith('Form ')) {
                 const formNum = parseInt(currentClass.replace('Form ', ''));
-                if (!isNaN(formNum)) {
-                    nextClass = `Form ${formNum + 1}`;
-                }
+                if (!isNaN(formNum)) nextClass = `Form ${formNum + 1}`;
             } else {
                 nextClass = 'Form 1';
             }
-        } else if (scholar.school_type === 'University') {
+        } else if (scholar.schoolType === 'University') {
             if (currentClass.startsWith('Year ')) {
                 const yearNum = parseInt(currentClass.replace('Year ', ''));
-                if (!isNaN(yearNum)) {
-                    nextClass = `Year ${yearNum + 1}`;
-                }
+                if (!isNaN(yearNum)) nextClass = `Year ${yearNum + 1}`;
             } else {
                 nextClass = 'Year 1';
             }
         }
 
-        const updated = await Scholar.promote(id, nextClass);
+        scholar.academicYear = nextClass;
+        await scholar.save();
 
-        await NotificationService.notifyAll(`📈 Scholar promoted: ${scholar.full_name} moved to ${nextClass}`, 'success', req.user ? req.user.fullName : 'System');
+        await NotificationService.notifyAll(`📈 Scholar promoted: ${scholar.fullName} moved to ${nextClass}`, 'success');
 
         return successResponse(res, {
             scholar_id: id,
             previous_class: currentClass,
             new_class: nextClass
-        }, `Scholar ${scholar.full_name} promoted successfully.`);
+        }, `Scholar ${scholar.fullName} promoted successfully.`);
     } catch (err) {
         next(err);
     }

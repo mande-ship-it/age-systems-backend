@@ -1,118 +1,92 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class Event {
-    static async create({ title, description, category, eventDate, eventTime, location, organizer, targetedParticipants }) {
-        const sql = `
-            INSERT INTO events (title, description, category, event_date, event_time, location, organizer, targeted_participants, status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending')
-            RETURNING id, title, description, category, event_date as date, event_time as time, location, organizer, targeted_participants as "targetedParticipants", status, created_at
-        `;
-        const result = await pool.query(sql, [title, description, category, eventDate, eventTime, location, organizer, targetedParticipants]);
-        return result.rows[0];
+const eventSchema = new mongoose.Schema({
+    title: { type: String, required: true },
+    description: { type: String },
+    category: { type: String, required: true },
+    eventDate: { type: Date, required: true },
+    eventTime: { type: String, required: true },
+    location: { type: String, required: true },
+    organizer: { type: String },
+    targetedParticipants: [String], // Roles or groups
+    internalParticipants: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    externalParticipants: [{
+        name: { type: String },
+        email: { type: String, lowercase: true }
+    }],
+    status: { type: String, default: 'Pending' }, // Pending, Active, History
+    completedAt: { type: Date }
+}, { timestamps: true });
+
+eventSchema.statics.getAll = function(status = null) {
+    const filter = status ? { status } : {};
+    return this.find(filter).sort({ eventDate: 1, eventTime: 1 });
+};
+
+eventSchema.statics.getEventsInDays = function(days) {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + days);
+    targetDate.setHours(0, 0, 0, 0);
+
+    const nextDate = new Date(targetDate);
+    nextDate.setDate(nextDate.getDate() + 1);
+
+    return this.find({
+        eventDate: {
+            $gte: targetDate,
+            $lt: nextDate
+        },
+        status: 'Active'
+    });
+};
+
+eventSchema.statics.cleanupHistory = async function() {
+    const twoDaysAgo = new Date();
+    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+
+    const expiredEvents = await this.find({
+        status: 'History',
+        eventDate: { $lt: twoDaysAgo }
+    });
+
+    if (expiredEvents.length > 0) {
+        await this.deleteMany({
+            _id: { $in: expiredEvents.map(e => e._id) }
+        });
     }
 
-    static async getAll(status = null) {
-        let sql = `
-            SELECT id, title, description, category, event_date as date, event_time as time, location, organizer, targeted_participants as "targetedParticipants", status, created_at
-            FROM events
-        `;
-        const params = [];
-        if (status) {
-            sql += ' WHERE status = $1';
-            params.push(status);
+    return expiredEvents;
+};
+
+eventSchema.statics.autoMoveToHistory = async function() {
+    const now = new Date();
+
+    // We fetch all active events and manually check if their combined date/time has passed
+    const activeEvents = await this.find({ status: 'Active' });
+    const pastEvents = [];
+
+    for (const event of activeEvents) {
+        const [hours, minutes] = event.eventTime.split(':').map(Number);
+        const combinedDateTime = new Date(event.eventDate);
+        combinedDateTime.setHours(hours, minutes, 0, 0);
+
+        if (combinedDateTime < now) {
+            event.status = 'History';
+            event.completedAt = now;
+            await event.save();
+            pastEvents.push(event);
         }
-        sql += ' ORDER BY event_date ASC, event_time ASC';
-        const result = await pool.query(sql, params);
-        return result.rows;
     }
 
-    static async findById(id) {
-        const sql = `
-            SELECT id, title, description, category, event_date as date, event_time as time, location, organizer, targeted_participants as "targetedParticipants", status, created_at
-            FROM events
-            WHERE id = $1
-        `;
-        const result = await pool.query(sql, [id]);
-        return result.rows[0];
-    }
+    return pastEvents;
+};
 
-    static async update(id, data) {
-        const fields = [];
-        const values = [];
-        let index = 1;
+eventSchema.statics.approve = function(id) {
+    return this.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
+};
 
-        for (const [key, value] of Object.entries(data)) {
-            // Map camelCase to snake_case for DB columns
-            const dbKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
-            fields.push(`${dbKey} = $${index++}`);
-            values.push(value);
-        }
+eventSchema.statics.delete = function(id) {
+    return this.findByIdAndDelete(id);
+};
 
-        if (fields.length === 0) return this.findById(id);
-
-        values.push(id);
-        const sql = `
-            UPDATE events
-            SET ${fields.join(', ')}
-            WHERE id = $${index}
-            RETURNING id, title, description, category, event_date as date, event_time as time, location, organizer, targeted_participants as "targetedParticipants", status, created_at
-        `;
-        const result = await pool.query(sql, values);
-        return result.rows[0];
-    }
-
-    static async approve(id) {
-        const sql = `
-            UPDATE events
-            SET status = 'Active'
-            WHERE id = $1
-            RETURNING id, title, status
-        `;
-        const result = await pool.query(sql, [id]);
-        return result.rows[0];
-    }
-
-    static async delete(id) {
-        const sql = 'DELETE FROM events WHERE id = $1 RETURNING id';
-        const result = await pool.query(sql, [id]);
-        return result.rows[0];
-    }
-
-    static async getEventsInDays(days) {
-        const sql = `
-            SELECT id, title, description, category, event_date as "eventDate", event_time as "eventTime", location, organizer
-            FROM events
-            WHERE event_date = CURRENT_DATE + interval '1 day' * $1 AND status = 'Active'
-        `;
-        const result = await pool.query(sql, [days]);
-        return result.rows;
-    }
-
-    static async autoMoveToHistory() {
-        // Move events where (date + time) <= NOW() and status is 'Active'
-        // Since event_date is DATE and event_time is TIME, we combine them
-        const sql = `
-            UPDATE events
-            SET status = 'History', completed_at = NOW()
-            WHERE status = 'Active'
-            AND (event_date + event_time) <= NOW()
-            RETURNING id, title;
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
-
-    static async cleanupHistory() {
-        // Delete events from 'History' where completed_at is older than 7 days
-        const sql = `
-            DELETE FROM events
-            WHERE status = 'History'
-            AND completed_at <= NOW() - interval '7 days'
-            RETURNING id, title;
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
-}
-
-module.exports = Event;
+module.exports = mongoose.model('Event', eventSchema);

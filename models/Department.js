@@ -1,82 +1,51 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class Department {
-    static async getAll() {
-        const result = await pool.query('SELECT * FROM departments ORDER BY name ASC');
-        return result.rows;
-    }
+const departmentSchema = new mongoose.Schema({
+    name: { type: String, unique: true, required: true },
+    code: { type: String, unique: true },
+    description: { type: String }
+}, { timestamps: true });
 
-    static async getAllWithCounts() {
-        const sql = `
-            SELECT d.*, COUNT(u.id)::int as user_count
-            FROM departments d
-            LEFT JOIN users u ON d.id = u.department_id
-            GROUP BY d.id
-            ORDER BY d.name ASC
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
+departmentSchema.statics.getAll = function() {
+    return this.find().sort({ name: 1 });
+};
 
-    static async findById(id) {
-        const result = await pool.query('SELECT * FROM departments WHERE id = $1', [id]);
-        return result.rows[0] || null;
-    }
+departmentSchema.statics.getAllWithCounts = async function() {
+    const User = mongoose.model('User');
+    const departments = await this.find().sort({ name: 1 });
 
-    static async getByName(name) {
-        if (!name) return null;
-        const result = await pool.query('SELECT * FROM departments WHERE LOWER(name) = LOWER($1)', [name.trim()]);
-        return result.rows[0] || null;
-    }
+    return Promise.all(departments.map(async (dept) => {
+        const count = await User.countDocuments({ departmentId: dept._id });
+        return {
+            ...dept.toObject(),
+            userCount: count
+        };
+    }));
+};
 
-    static async create({ name, description, code }) {
-        const sql = `
-            INSERT INTO departments (name, description, code)
-            VALUES ($1, $2, $3)
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [name, description, code]);
-        return result.rows[0];
-    }
+departmentSchema.statics.getUsers = function(id) {
+    const User = mongoose.model('User');
+    return User.find({ departmentId: id }).sort({ fullName: 1 });
+};
 
-    static async update(id, data) {
-        const { name, description, code } = data;
+departmentSchema.statics.update = function(id, data) {
+    return this.findByIdAndUpdate(id, data, { new: true });
+};
 
-        let sql = 'UPDATE departments SET ';
-        const params = [];
-        const updates = [];
-        let i = 1;
+departmentSchema.statics.delete = function(id) {
+    return this.findByIdAndDelete(id);
+};
 
-        if (name !== undefined) { updates.push(`name = $${i++}`); params.push(name); }
-        if (description !== undefined) { updates.push(`description = $${i++}`); params.push(description); }
-        if (code !== undefined) { updates.push(`code = $${i++}`); params.push(code); }
+// Virtuals for frontend compatibility
+departmentSchema.virtual('id').get(function() {
+    return this._id.toHexString();
+});
 
-        if (updates.length === 0) return this.findById(id);
+departmentSchema.virtual('created_at').get(function() {
+    return this.createdAt;
+});
 
-        sql += updates.join(', ');
-        sql += ` WHERE id = $${i} RETURNING *`;
-        params.push(id);
+departmentSchema.set('toJSON', { virtuals: true });
+departmentSchema.set('toObject', { virtuals: true });
 
-        const result = await pool.query(sql, params);
-        return result.rows[0];
-    }
-
-    static async delete(id) {
-        const result = await pool.query('DELETE FROM departments WHERE id = $1 RETURNING id', [id]);
-        return result.rows[0];
-    }
-
-    static async getUsers(id) {
-        const sql = `
-            SELECT u.id, u.full_name, u.username, u.email, u.phone, u.created_at, r.name as role_name
-            FROM users u
-            JOIN roles r ON u.role_id = r.id
-            WHERE u.department_id = $1
-            ORDER BY u.full_name ASC
-        `;
-        const result = await pool.query(sql, [id]);
-        return result.rows;
-    }
-}
-
-module.exports = Department;
+module.exports = mongoose.model('Department', departmentSchema);

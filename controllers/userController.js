@@ -1,191 +1,167 @@
 const User = require('../models/User');
 const Role = require('../models/Role');
 const Department = require('../models/Department');
+const mongoose = require('mongoose');
 const AuditLog = require('../models/AuditLog');
 const bcrypt = require('bcrypt');
 const { sendOTP } = require('../utils/notifier');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
-/**
- * Get all users
- */
 const getAllUsers = async (req, res, next) => {
     try {
-        const users = await User.getAll();
-        return successResponse(res, users, 'Users retrieved successfully.');
+        const users = await User.find().populate('roleId departmentId').sort({ createdAt: -1 });
+        return successResponse(res, users);
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Create a new system user
- */
+const getUserById = async (req, res, next) => {
+    try {
+        const { id } = req.params;
+        if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid User ID', 400);
+
+        const user = await User.findById(id).populate('roleId departmentId');
+        if (!user) return errorResponse(res, 'User not found', 404);
+
+        return successResponse(res, user);
+    } catch (err) {
+        next(err);
+    }
+};
+
 const createUser = async (req, res, next) => {
     try {
-        const {
-            fullName, username, email, phone, password, roleName, role_name, roleId, role_id, department, departmentName, departmentId, department_id, location, bio, isActive, notes
-        } = req.body;
+        const { email, username, fullName, roleName, departmentName, departmentId, password } = req.body;
 
-        // Support multiple field naming conventions
-        const targetRoleName = roleName || role_name;
-        const targetRoleId = roleId || role_id;
-        const targetDepartmentId = departmentId || department_id;
-        const targetDepartmentName = departmentName || department;
+        console.log('Attempting to create user:', { email, username, roleName, departmentId });
 
-        // Check if email already exists
-        const existingEmail = await User.findByEmail(email);
-        if (existingEmail) return errorResponse(res, 'A user with this email already exists.', 400);
+        const existing = await User.findOne({
+            $or: [
+                { email: (email || '').toLowerCase() },
+                { username: (username || '').toLowerCase() }
+            ]
+        });
 
-        // Check if username already exists
-        const existingUsername = await User.findByUsername(username);
-        if (existingUsername) return errorResponse(res, 'Username is already taken.', 400);
+        if (existing) {
+            console.log('User creation failed: User already exists');
+            return errorResponse(res, 'A user with this email or username already exists.', 400);
+        }
 
+        // Resolve Role
         let role;
-        if (targetRoleId) {
-            role = await Role.findById(targetRoleId);
-        } else if (targetRoleName) {
-            role = await Role.getByName(targetRoleName);
+        if (roleName) {
+            role = await Role.findOne({ name: roleName });
         }
 
-        if (!role) {
-            return errorResponse(res, 'A valid system role must be selected.', 400);
-        }
-
+        // Resolve Department
         let dept;
-        if (targetDepartmentId) {
-            dept = await Department.findById(targetDepartmentId);
-        } else if (targetDepartmentName) {
-            dept = await Department.getByName(targetDepartmentName);
+        if (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) {
+            dept = await Department.findById(departmentId);
+        } else if (departmentName) {
+            dept = await Department.findOne({ name: departmentName });
         }
 
-        // Generate a random temporary password if none provided
-        const tempPassword = password || Math.random().toString(36).slice(-10);
-
-        // Security: Hash password
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(tempPassword, salt);
-
-        // Generate 6-digit random OTP for first login
+        const tempPassword = password || Math.random().toString(36).slice(-8);
+        const passwordHash = await bcrypt.hash(tempPassword, 10);
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-
-        // Expiry set to 2 days (48 hours)
         const otpExpiry = new Date();
-        otpExpiry.setDate(otpExpiry.getDate() + 2);
+        otpExpiry.setHours(otpExpiry.getHours() + 48);
 
-        // Create the basic user record
-        const newUser = await User.create({
-            email,
-            username,
+        const user = new User({
+            ...req.body,
+            email: email.toLowerCase(),
+            username: username.toLowerCase(),
             passwordHash,
-            roleId: role.id,
-            fullName,
-            phone,
-            departmentId: dept ? dept.id : null,
-            location,
-            bio,
-            isActive: isActive !== undefined ? isActive : true,
-            notes,
+            roleId: role?._id,
+            departmentId: dept?._id,
             otpCode,
-            otpExpiry
+            otpExpiry,
+            isFirstLogin: true
         });
 
-        // Manually update the object for the API response
-        newUser.role_name = role.name;
-        if (dept) newUser.department_name = dept.name;
+        await user.save();
+        console.log('User created successfully:', user._id);
 
-        // Send OTP via real channels
-        await sendOTP(newUser, otpCode, tempPassword);
+        // Email logic...
+        try {
+            await sendOTP(user, otpCode, tempPassword, roleName);
+        } catch (e) {
+            console.error('Failed to send OTP email:', e.message);
+        }
 
-        console.log(`User created: ${email} [TempPass: ${tempPassword}, OTP: ${otpCode}]`);
-
-        await NotificationService.notifyAll(`👤 New User created: ${fullName} (${role.name})`, 'success', req.user ? req.user.fullName : 'System');
-
-        await AuditLog.log({
-            userId: req.user ? req.user.id : null,
-            action: 'User Creation',
-            details: `Created new user ${fullName} with role ${role.name}`,
-            actorName: req.user ? req.user.fullName : 'System'
-        });
-
-        return successResponse(res, {
-            user: newUser,
-            otp_sent: true,
-            expires_at: otpExpiry,
-            temp_password: tempPassword // Include temp password in response for admin
-        }, 'User account created and credentials sent to email.', 201);
+        await NotificationService.notifyAll(`👤 New User: ${fullName}`, 'success');
+        return successResponse(res, { user, temp_password: tempPassword }, 'User created successfully.', 201);
     } catch (err) {
+        console.error('createUser error:', err);
         next(err);
     }
 };
 
-/**
- * Update user
- */
 const updateUser = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
+        const { roleName, departmentId, email, username } = req.body;
 
-        if (updateData.roleName) {
-            const role = await Role.getByName(updateData.roleName);
-            if (!role) return errorResponse(res, 'Invalid role.', 400);
-            updateData.roleId = role.id;
-            delete updateData.roleName;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return errorResponse(res, 'Invalid User ID.', 400);
         }
 
-        if (updateData.departmentName) {
-            const dept = await Department.getByName(updateData.departmentName);
-            if (!dept) return errorResponse(res, 'Invalid department.', 400);
-            updateData.departmentId = dept.id;
-            delete updateData.departmentName;
+        const updateData = { ...req.body };
+
+        // Resolve Role if name provided
+        if (roleName) {
+            const role = await Role.findOne({ name: roleName });
+            if (role) updateData.roleId = role._id;
         }
 
-        if (updateData.password) {
-            const salt = await bcrypt.genSalt(10);
-            updateData.passwordHash = await bcrypt.hash(updateData.password, salt);
-            delete updateData.password;
+        // Validate Department if ID provided
+        if (departmentId && !mongoose.Types.ObjectId.isValid(departmentId)) {
+            delete updateData.departmentId; // Remove invalid ID
         }
 
-        const updatedUser = await User.update(id, updateData);
+        // Clean up password from generic update to prevent accidental hash override
+        delete updateData.password;
+        if (email) updateData.email = email.toLowerCase();
+        if (username) updateData.username = username.toLowerCase();
 
-        await NotificationService.notifyAll(`👤 User profile updated: ${updatedUser.full_name}`, 'info', req.user ? req.user.fullName : 'System');
+        const updated = await User.findByIdAndUpdate(id, updateData, { new: true })
+            .populate('roleId departmentId');
 
-        await AuditLog.log({
-            userId: req.user ? req.user.id : null,
-            action: 'User Update',
-            details: `Updated user profile for: ${updatedUser.full_name}`,
-            actorName: req.user ? req.user.fullName : 'System'
-        });
+        if (!updated) return errorResponse(res, 'User not found.', 404);
 
-        return successResponse(res, updatedUser, 'User updated successfully.');
+        return successResponse(res, updated, 'User profile updated successfully.');
+    } catch (err) {
+        console.error('updateUser error:', err);
+        next(err);
+    }
+};
+
+const deleteUser = async (req, res, next) => {
+    try {
+        await User.findByIdAndDelete(req.params.id);
+        return successResponse(res, null, 'User deleted.');
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Delete user
- */
-const deleteUser = async (req, res, next) => {
+const getDirector = async (req, res, next) => {
     try {
-        const { id } = req.params;
-        const user = await User.findById(id);
-        await User.delete(id);
+        // Try to find a user with 'Director' in their name
+        let user = await User.findOne({ fullName: /Director/i }).sort({ createdAt: 1 });
 
-        if (user) {
-            await NotificationService.notifyAll(`🗑️ User removed: ${user.full_name}`, 'warning', req.user ? req.user.fullName : 'System');
-
-            await AuditLog.log({
-                userId: req.user ? req.user.id : null,
-                action: 'User Deletion',
-                details: `Deleted user: ${user.full_name} (${user.email})`,
-                actorName: req.user ? req.user.fullName : 'System'
-            });
+        if (!user) {
+            // Try to find by role
+            const role = await Role.findOne({ name: /Director/i });
+            if (role) {
+                user = await User.findOne({ roleId: role._id });
+            }
         }
 
-        return successResponse(res, { id }, 'User permanently deleted.');
+        const name = user ? user.fullName : 'EDWARD YOUNG SHABA';
+        return successResponse(res, { name }, 'Director name retrieved.');
     } catch (err) {
         next(err);
     }
@@ -193,7 +169,9 @@ const deleteUser = async (req, res, next) => {
 
 module.exports = {
     getAllUsers,
+    getUserById,
     createUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    getDirector
 };

@@ -1,12 +1,10 @@
 const AcademicResult = require('../models/AcademicResult');
 const Subject = require('../models/Subject');
 const Scholar = require('../models/Scholar');
+const mongoose = require('mongoose');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
-/**
- * Replicating frontend grading logic for consistency
- */
 const calculateGrade = (marks, isUniversity) => {
     if (isUniversity) {
         if (marks >= 75) return { letter: 'A', point: 4.00 };
@@ -17,7 +15,6 @@ const calculateGrade = (marks, isUniversity) => {
         if (marks >= 50) return { letter: 'D', point: 1.00 };
         return { letter: 'F', point: 0.00 };
     } else {
-        // Secondary School (MSCE style)
         if (marks >= 80) return { letter: 'Distinction', point: 1.0 };
         if (marks >= 75) return { letter: 'Distinction', point: 2.0 };
         if (marks >= 70) return { letter: 'Credit', point: 3.0 };
@@ -30,63 +27,49 @@ const calculateGrade = (marks, isUniversity) => {
     }
 };
 
-/**
- * Record or update results (supports bulk)
- */
 const recordResults = async (req, res, next) => {
     try {
         const { scholarId, results, year, term, semester, schoolType } = req.body;
+
+        // Ensure scholar is active
+        const scholar = await Scholar.findById(scholarId);
+        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
+        if (scholar.status !== 'Active') {
+            return errorResponse(res, `Cannot record results for ${scholar.status} scholars. Only Active scholars are permitted.`, 403);
+        }
+
         const isUniversity = schoolType === 'University';
 
-        const scholar = await Scholar.findById(scholarId);
         const savedResults = [];
 
         for (const resEntry of results) {
-            let subject = await Subject.findByNameAndLevel(resEntry.subjectName, schoolType);
+            let subject = await Subject.findOne({ name: new RegExp(`^${resEntry.subjectName}$`, 'i'), level: schoolType });
 
-            // Auto-register subject if it doesn't exist (matching frontend behavior)
             if (!subject) {
-                const baseCode = resEntry.subjectName.replace(/[^a-zA-Z]/g, '').substring(0, 4).toUpperCase() || 'SUBJ';
-                let counter = 101;
-                let autoCode = `${baseCode}${counter}`;
-                
-                // Keep incrementing until we find a unique code to avoid 500 error
-                while (await Subject.findByCode(autoCode)) {
-                    counter++;
-                    autoCode = `${baseCode}${counter}`;
-                }
-
+                const autoCode = `SUB-${Math.floor(1000 + Math.random() * 9000)}`;
                 subject = await Subject.create({
                     name: resEntry.subjectName,
                     code: autoCode,
-                    level: schoolType,
-                    details: 'Auto-registered during results entry.'
+                    level: schoolType
                 });
             }
 
             const graded = calculateGrade(resEntry.marks, isUniversity);
 
-            const record = await AcademicResult.upsert({
-                scholarId: scholarId || resEntry.scholarId,
-                subjectId: subject.id,
+            const filter = { scholarId, subjectId: subject._id, year };
+            if (isUniversity) filter.semester = semester; else filter.term = term;
+
+            const update = {
                 marks: resEntry.marks,
                 gradeLetter: graded.letter,
-                gradePoint: graded.point,
-                year,
-                term: !isUniversity ? term : null,
-                semester: isUniversity ? semester : null
-            });
+                gradePoint: graded.point
+            };
 
+            const record = await AcademicResult.findOneAndUpdate(filter, update, { upsert: true, new: true });
             savedResults.push(record);
         }
 
-        if (scholar) {
-            const period = isUniversity ? semester : term;
-            await NotificationService.notifyAll(`🎓 Academic results entered for ${scholar.full_name} (${year}, ${period})`, 'success', req.user ? req.user.fullName : 'System');
-
-            // Trigger progression evaluation
-            await Scholar.evaluateProgression(scholar.id, year);
-        }
+        await NotificationService.notifyAll(`🎓 Academic results entered (${year})`, 'success');
 
         return successResponse(res, savedResults, `Successfully saved ${savedResults.length} result(s).`, 201);
     } catch (err) {
@@ -94,96 +77,50 @@ const recordResults = async (req, res, next) => {
     }
 };
 
-/**
- * Get results for a specific scholar
- */
 const getScholarResults = async (req, res, next) => {
     try {
-        const scholarId = req.params.scholarId || req.query.scholarId;
+        let scholarId = req.params.scholarId || req.query.scholarId;
         const { year } = req.query;
 
-        let results;
-        if (scholarId && scholarId !== '') {
-            results = await AcademicResult.getByScholar(scholarId, year);
-        } else {
-            // Fetch all results if no scholarId is provided
-            const pool = require('../config/database');
-            const sql = `
-                SELECT r.*, s.name as subject_name, s.code as subject_code
-                FROM academic_results r
-                JOIN subjects s ON r.subject_id = s.id
-                ORDER BY r.year DESC, r.term ASC, r.semester ASC
-            `;
-            const result = await pool.query(sql);
-            results = result.rows;
+        if (!scholarId) {
+            return errorResponse(res, 'Scholar ID is required.', 400);
         }
 
-        const mappedResults = results.map(r => ({
-            ...r,
-            scholar_id: r.scholar_id.toString(), // Ensure string for frontend matching
-            academic_year: r.year.toString(),    // Ensure string for frontend filtering
-            year: r.year.toString(),             // Provide both for compatibility
-            marks: parseFloat(r.marks) || 0,
-            gpa: r.semester ? (parseFloat(r.grade_point) || 0) : null,
-            points: r.term ? (parseFloat(r.grade_point) || 0) : null,
-            subject_name: r.subject_name,
-            subject_code: r.subject_code
-        }));
-
-        return successResponse(res, mappedResults, 'Scholar results retrieved successfully.');
-    } catch (err) {
-        next(err);
-    }
-};
-
-const getSchoolResults = async (req, res, next) => {
-    try {
-        const { schoolId, schoolName, year, term, semester } = req.query;
-        if (!schoolId && !schoolName) {
-            return errorResponse(res, 'School ID or School Name is required.', 400);
+        // If it's not a valid ObjectId, try finding the scholar by their string ID (e.g., AGE-001)
+        if (!mongoose.Types.ObjectId.isValid(scholarId)) {
+            const scholar = await Scholar.findOne({ scholarId: scholarId });
+            if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
+            scholarId = scholar._id;
         }
 
-        const results = await AcademicResult.getBySchool(schoolId || schoolName, year, term, semester);
-        
-        const mappedResults = results.map(r => ({
-            ...r,
-            academic_year: r.year,
-            gpa: r.semester ? parseFloat(r.grade_point) : null,
-            points: r.term ? parseFloat(r.grade_point) : null,
-            scholar_id: r.scholar_id,
-            scholar_name: r.scholar_name,
-            subject: r.subject_name,
-            marks: r.marks,
-            grade: r.grade_letter
-        }));
+        const results = await AcademicResult.find({ scholarId, ...(year && { year }) })
+            .populate('subjectId')
+            .sort({ year: -1, term: 1, semester: 1 });
 
-        return successResponse(res, mappedResults, 'School results retrieved successfully.');
+        const mappedResults = results.map(r => {
+            const resultObj = r.toObject();
+            return {
+                ...resultObj,
+                marks: parseFloat(r.marks),
+                gpa: r.semester ? r.gradePoint : null,
+                points: r.term ? r.gradePoint : null,
+                subject_name: r.subjectId ? r.subjectId.name : 'N/A',
+                subject_code: r.subjectId ? r.subjectId.code : 'N/A',
+                scholar_id: r.scholarId ? (r.scholarId._id ? r.scholarId._id.toString() : r.scholarId.toString()) : 'N/A'
+            };
+        });
+
+        return successResponse(res, mappedResults);
     } catch (err) {
         next(err);
     }
 };
 
-/**
- * Get analysis stats for a specific year
- */
-const getYearlyStats = async (req, res, next) => {
-    try {
-        const { year } = req.params;
-        const results = await AcademicResult.getStatsByYear(year);
-        return successResponse(res, results, `Academic statistics for ${year} retrieved.`);
-    } catch (err) {
-        next(err);
-    }
-};
-
-/**
- * Subject Registry Management
- */
 const getSubjectRegistry = async (req, res, next) => {
     try {
         const { level } = req.query;
-        const subjects = await Subject.getAll(level);
-        return successResponse(res, subjects, 'Subject registry retrieved.');
+        const subjects = await Subject.find(level ? { level } : {}).sort({ name: 1 });
+        return successResponse(res, subjects);
     } catch (err) {
         next(err);
     }
@@ -191,19 +128,66 @@ const getSubjectRegistry = async (req, res, next) => {
 
 const createSubject = async (req, res, next) => {
     try {
-        const { code } = req.body;
+        const subject = new Subject(req.body);
+        await subject.save();
+        return successResponse(res, subject, 'Subject registered.', 201);
+    } catch (err) {
+        next(err);
+    }
+};
 
-        // Manual check to provide a nice error instead of 500
-        const existing = await Subject.findByCode(code);
-        if (existing) {
-            return errorResponse(res, `Subject code "${code}" already exists. Please provide a unique code.`, 400);
+const getSchoolResults = async (req, res, next) => {
+    try {
+        const { schoolId, year } = req.query;
+        const filter = {};
+        if (schoolId) {
+            if (!mongoose.Types.ObjectId.isValid(schoolId)) {
+                return errorResponse(res, 'Invalid School ID.', 400);
+            }
+            const scholars = await Scholar.find({ schoolId }).select('_id');
+            filter.scholarId = { $in: scholars.map(s => s._id) };
         }
+        if (year) filter.year = parseInt(year);
 
-        const subject = await Subject.create(req.body);
+        const results = await AcademicResult.find(filter)
+            .populate('scholarId subjectId')
+            .sort({ year: -1 });
 
-        await NotificationService.notifyAll(`📚 New subject registered: ${subject.name} (${subject.code})`, 'info', req.user ? req.user.fullName : 'System');
+        const mappedResults = results.map(r => ({
+            ...r.toObject(),
+            marks: parseFloat(r.marks),
+            gpa: r.semester ? r.gradePoint : null,
+            points: r.term ? r.gradePoint : null,
+            subject_name: r.subjectId ? r.subjectId.name : 'N/A',
+            subject_code: r.subjectId ? r.subjectId.code : 'N/A',
+            scholar_id: r.scholarId ? (r.scholarId._id ? r.scholarId._id.toString() : r.scholarId.toString()) : 'N/A'
+        }));
 
-        return successResponse(res, subject, 'Subject registered successfully.', 201);
+        return successResponse(res, mappedResults);
+    } catch (err) {
+        next(err);
+    }
+};
+
+const getYearlyStats = async (req, res, next) => {
+    try {
+        const { year } = req.params;
+        const stats = await AcademicResult.aggregate([
+            { $match: { year: parseInt(year) } },
+            { $group: {
+                _id: "$scholarId",
+                avgMark: { $avg: "$marks" },
+                count: { $sum: 1 }
+            }},
+            { $lookup: {
+                from: 'scholars',
+                localField: '_id',
+                foreignField: '_id',
+                as: 'scholar'
+            }},
+            { $unwind: '$scholar' }
+        ]);
+        return successResponse(res, stats);
     } catch (err) {
         next(err);
     }
@@ -212,15 +196,8 @@ const createSubject = async (req, res, next) => {
 const deleteSubject = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const subject = await Subject.findById(id);
-        const deleted = await Subject.delete(id);
-        if (!deleted) return errorResponse(res, 'Subject not found.', 404);
-
-        if (subject) {
-            await NotificationService.notifyAll(`🗑️ Subject removed from registry: ${subject.name} (${subject.code})`, 'warning', req.user ? req.user.fullName : 'System');
-        }
-
-        return successResponse(res, { id }, 'Subject removed from registry.');
+        await Subject.findByIdAndDelete(id);
+        return successResponse(res, null, 'Subject deleted.');
     } catch (err) {
         next(err);
     }
@@ -228,25 +205,37 @@ const deleteSubject = async (req, res, next) => {
 
 const checkResultCompleteness = async (req, res, next) => {
     try {
-        const { scholarId, year } = req.params;
-        const results = await AcademicResult.getByScholar(scholarId, year);
-        const scholar = await Scholar.findById(scholarId);
+        let { scholarId, year } = req.params;
 
-        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
+        if (!scholarId) return errorResponse(res, 'Scholar ID is required.', 400);
 
-        const terms = [...new Set(results.map(r => r.term).filter(Boolean))];
-        const semesters = [...new Set(results.map(r => r.semester).filter(Boolean))];
+        if (!mongoose.Types.ObjectId.isValid(scholarId)) {
+            const scholar = await Scholar.findOne({ scholarId });
+            if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
+            scholarId = scholar._id;
+        }
 
-        const isComplete = (scholar.school_type === 'Secondary' && terms.length === 3) ||
-                           (scholar.school_type === 'University' && semesters.length === 2);
+        const count = await AcademicResult.countDocuments({ scholarId, year });
+        return successResponse(res, { count, isComplete: count >= 6 });
+    } catch (err) {
+        next(err);
+    }
+};
 
-        return successResponse(res, {
-            isComplete,
-            termsRecorded: terms,
-            semestersRecorded: semesters,
-            requiredTerms: scholar.school_type === 'Secondary' ? 3 : 0,
-            requiredSemesters: scholar.school_type === 'University' ? 2 : 0
-        }, 'Result completeness check completed.');
+const getSchoolsWithResults = async (req, res, next) => {
+    try {
+        const scholarIdsWithResults = await AcademicResult.distinct('scholarId');
+        const scholars = await Scholar.find({ _id: { $in: scholarIdsWithResults } })
+            .populate('schoolId')
+            .select('schoolId schoolName');
+
+        const schoolNames = new Set();
+        scholars.forEach(s => {
+            if (s.schoolId && s.schoolId.name) schoolNames.add(s.schoolId.name);
+            else if (s.schoolName) schoolNames.add(s.schoolName);
+        });
+
+        return successResponse(res, Array.from(schoolNames).sort().map(name => ({ name })));
     } catch (err) {
         next(err);
     }
@@ -255,10 +244,11 @@ const checkResultCompleteness = async (req, res, next) => {
 module.exports = {
     recordResults,
     getScholarResults,
-    getSchoolResults,
-    getYearlyStats,
     getSubjectRegistry,
     createSubject,
+    getSchoolResults,
+    getYearlyStats,
     deleteSubject,
-    checkResultCompleteness
+    checkResultCompleteness,
+    getSchoolsWithResults
 };

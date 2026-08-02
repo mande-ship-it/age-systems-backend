@@ -12,21 +12,15 @@ const loginRules = [
 ];
 
 const verifyOTPRules = [
-    body('userId').isInt().withMessage('User ID is required'),
+    body('userId').isMongoId().withMessage('Valid User ID is required'),
     body('otp').isLength({ min: 6, max: 6 }).withMessage('OTP must be 6 digits')
 ];
 
 const createUserRules = [
     body('fullName')
-        .optional()
         .trim()
         .notEmpty()
-        .withMessage('Full name cannot be empty'),
-    body('name')
-        .optional()
-        .trim()
-        .notEmpty()
-        .withMessage('Name cannot be empty'),
+        .withMessage('Full name is required'),
     body('username')
         .trim()
         .isLength({ min: 4 })

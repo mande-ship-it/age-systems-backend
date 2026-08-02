@@ -1,304 +1,244 @@
-const pool = require('../config/database');
+const Scholar = require('../models/Scholar');
+const Sponsor = require('../models/Sponsor');
+const School = require('../models/School');
+const Event = require('../models/Event');
+const Payment = require('../models/Payment');
+const AcademicResult = require('../models/AcademicResult');
+const Attendance = require('../models/Attendance');
+const User = require('../models/User');
+const Backup = require('../models/Backup');
 const { successResponse } = require('../utils/response');
+const mongoose = require('mongoose');
 
-/**
- * Get high-fidelity analytics and statistics for the CHATS dashboard
- */
 const getDashboardStats = async (req, res, next) => {
     try {
         const { level = 'University', schoolId } = req.query;
 
-        // 1. Unified Summary Counts (Global stats)
-        const totalScholarsRes = await pool.query('SELECT COUNT(*) FROM scholars');
-        const activeCountRes = await pool.query("SELECT COUNT(*) FROM scholars WHERE status = 'Active'");
-        const graduatedCountRes = await pool.query("SELECT COUNT(*) FROM scholars WHERE status IN ('Graduated', 'Alumni')");
-        const uniActiveRes = await pool.query("SELECT COUNT(*) FROM scholars WHERE status = 'Active' AND (school_type = 'University' OR school_type = 'Tertiary / University')");
-        const secActiveRes = await pool.query("SELECT COUNT(*) FROM scholars WHERE status = 'Active' AND school_type = 'Secondary'");
-        const sponsorsCountRes = await pool.query('SELECT COUNT(*) FROM sponsors');
+        // 1. Unified Summary Counts
+        const [totalScholars, activeScholars, graduatedScholars, uniActive, secActive, totalSponsors, totalUsers, totalSchools, backupCount] = await Promise.all([
+            Scholar.countDocuments(),
+            Scholar.countDocuments({ status: 'Active' }),
+            Scholar.countDocuments({ status: { $in: ['Graduated', 'Alumni'] } }),
+            Scholar.countDocuments({ status: 'Active', schoolType: 'University' }),
+            Scholar.countDocuments({ status: 'Active', schoolType: 'Secondary' }),
+            Sponsor.countDocuments(),
+            User.countDocuments(),
+            School.countDocuments(),
+            Backup.countDocuments()
+        ]);
 
-        // ... existing code for retention, cohort, trends, etc. ...
+        // 2. Retention Analytics
+        const retentionFilter = { schoolType: level };
+        if (schoolId) retentionFilter.schoolId = mongoose.Types.ObjectId(schoolId);
 
-        // 2. Retention Analytics for selected scope
-        let retentionSql = `
-            SELECT
-                COUNT(*) as initial_total,
-                COUNT(*) FILTER (WHERE status IN ('Active', 'Graduated')) as current_retained
-            FROM scholars
-            WHERE (school_type = $1 OR ($1 = 'University' AND school_type = 'Tertiary / University'))
-        `;
-        const retentionParams = [level];
-        if (schoolId) {
-            retentionSql += ` AND school_id = $2`;
-            retentionParams.push(schoolId);
-        }
-        const retentionRes = await pool.query(retentionSql, retentionParams);
+        const retentionStats = await Scholar.aggregate([
+            { $match: retentionFilter },
+            { $group: {
+                _id: null,
+                total: { $sum: 1 },
+                retained: { $sum: { $cond: [{ $in: ["$status", ["Active", "Graduated"]] }, 1, 0] } }
+            }}
+        ]);
 
-        const initialTotal = parseInt(retentionRes.rows[0].initial_total || 0);
-        const currentRetained = parseInt(retentionRes.rows[0].current_retained || 0);
+        const initialTotal = retentionStats[0]?.total || 0;
+        const currentRetained = retentionStats[0]?.retained || 0;
         const retentionRate = initialTotal > 0 ? ((currentRetained / initialTotal) * 100).toFixed(1) : 100;
 
-        // 3. Cohort Distribution (last 4 cohorts) - Active Only
-        let cohortSql = `
-            SELECT
-                start_year as cohort,
-                COUNT(*)::int as count
-            FROM scholars
-            WHERE (school_type = $1 OR ($1 = 'University' AND school_type = 'Tertiary / University'))
-              AND status NOT IN ('Graduated', 'Alumni')
-              AND start_year IS NOT NULL
-              AND start_year != ''
-        `;
-        const cohortParams = [level];
-        if (schoolId) {
-            cohortSql += ` AND school_id = $2`;
-            cohortParams.push(schoolId);
-        }
-        cohortSql += ` GROUP BY start_year ORDER BY start_year DESC LIMIT 4`;
-        const cohortRes = await pool.query(cohortSql, cohortParams);
+        // 3. Cohort Distribution (last 4 active cohorts)
+        const cohortDistribution = await Scholar.aggregate([
+            { $match: { schoolType: level, status: 'Active', startYear: { $ne: null } } },
+            { $group: { _id: "$startYear", count: { $sum: 1 } } },
+            { $sort: { _id: -1 } },
+            { $limit: 4 },
+            { $project: { cohort: "$_id", count: 1, _id: 0 } }
+        ]);
 
-        // 4. Institutional Performance Trends - Active Only
-        let trendsSql = `
-            SELECT
-                ar.year,
-                COALESCE(sch.name, s.school_name, 'Unassigned Institution') as school_name,
-                AVG(ar.marks)::numeric(5,2) as avg_marks
-            FROM academic_results ar
-            JOIN scholars s ON ar.scholar_id = s.id
-            LEFT JOIN schools sch ON s.school_id = sch.id
-            WHERE (s.school_type = $1 OR ($1 = 'University' AND s.school_type = 'Tertiary / University'))
-              AND s.status NOT IN ('Graduated', 'Alumni')
-        `;
-        const trendsParams = [level];
-        if (schoolId) {
-            trendsSql += ` AND s.school_id = $2`;
-            trendsParams.push(schoolId);
-        }
-        trendsSql += ` GROUP BY ar.year, sch.name, s.school_name ORDER BY ar.year ASC`;
-        const trendsRes = await pool.query(trendsSql, trendsParams);
+        // 4. Institutional Performance Trends
+        const trendsMatch = { schoolType: level, status: 'Active' };
+        if (schoolId) trendsMatch.schoolId = mongoose.Types.ObjectId(schoolId);
+
+        const performanceTrends = await AcademicResult.aggregate([
+            { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
+            { $unwind: "$scholar" },
+            { $match: { "scholar.schoolType": level, "scholar.status": "Active" } },
+            { $group: {
+                _id: { year: "$year", school: "$scholar.schoolName" },
+                avgMarks: { $avg: "$marks" }
+            }},
+            { $sort: { "_id.year": 1 } }
+        ]);
 
         const performanceSeries = {};
-        trendsRes.rows.forEach(row => {
-            if (!performanceSeries[row.school_name]) performanceSeries[row.school_name] = [];
-            performanceSeries[row.school_name].push({ year: row.year, marks: parseFloat(row.avg_marks) });
+        performanceTrends.forEach(t => {
+            const name = t._id.school || 'Unassigned';
+            if (!performanceSeries[name]) performanceSeries[name] = [];
+            performanceSeries[name].push({ year: t._id.year, marks: t.avgMarks.toFixed(1) });
         });
 
-        // 5. Regional Impact Distribution - Active Only
-        let regionSql = `
-            SELECT
-                COALESCE(sch.region, s.district, 'Unassigned') as region,
-                COUNT(*)::int as count
-            FROM scholars s
-            LEFT JOIN schools sch ON s.school_id = sch.id
-            WHERE (s.school_type = $1 OR ($1 = 'University' AND s.school_type = 'Tertiary / University'))
-              AND s.status NOT IN ('Graduated', 'Alumni')
-        `;
-        const regionParams = [level];
-        if (schoolId) {
-            regionSql += ` AND s.school_id = $2`;
-            regionParams.push(schoolId);
+        // 5. Pending Total & Summary
+        const [pendingScholars, pendingEvents, pendingPayments] = await Promise.all([
+            Scholar.find({ status: 'Pending' }).limit(5),
+            Event.find({ status: 'Pending' }).limit(5),
+            Payment.find({ status: 'Pending' }).limit(5)
+        ]);
+
+        const approvalsSummary = [];
+        const userRole = req.user?.role || '';
+        const canApproveScholars = ['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole);
+
+        if (canApproveScholars) {
+            pendingScholars.forEach(s => approvalsSummary.push({ title: 'New Scholar Registration', desc: s.fullName, time: 'Action Required', type: 'scholar' }));
         }
-        regionSql += ` GROUP BY 1 ORDER BY count DESC LIMIT 3`;
-        const regionRes = await pool.query(regionSql, regionParams);
+        pendingEvents.forEach(e => approvalsSummary.push({ title: 'New Event Proposal', desc: e.title, time: 'Action Required', type: 'event' }));
 
-        // 6. Performance by CHATS Engagement - Active Only
-        const engagementRes = await pool.query(`
-            WITH scholar_engagement AS (
-                SELECT
-                    scholar_id,
-                    COUNT(*) FILTER (WHERE status = 'present')::float / NULLIF(COUNT(*), 0)::float * 100 as att_rate
-                FROM attendance
-                GROUP BY scholar_id
-            ),
-            engagement_yearly AS (
-                SELECT
-                    ar.year,
-                    CASE
-                        WHEN COALESCE(se.att_rate, 0) >= 80 THEN 'Frequent'
-                        WHEN COALESCE(se.att_rate, 0) >= 50 THEN 'Moderate'
-                        ELSE 'Rare'
-                    END as eng_level,
-                    AVG(ar.marks) as avg_mark
-                FROM academic_results ar
-                JOIN scholars s ON ar.scholar_id = s.id
-                LEFT JOIN scholar_engagement se ON s.id = se.scholar_id
-                WHERE (s.school_type = $1 OR ($1 = 'University' AND s.school_type = 'Tertiary / University'))
-                  AND s.status NOT IN ('Graduated', 'Alumni')
-                ${schoolId ? 'AND s.school_id = $2' : ''}
-                GROUP BY 1, 2
-            )
-            SELECT year, eng_level, AVG(avg_mark)::numeric(5,2) as score
-            FROM engagement_yearly
-            GROUP BY 1, 2
-            ORDER BY year ASC
-        `, schoolId ? [level, schoolId] : [level]);
+        const pScholarsCount = await Scholar.countDocuments({ status: 'Pending' });
+        const pEventsCount = await Event.countDocuments({ status: 'Pending' });
+        const pPaymentsCount = await Payment.countDocuments({ status: 'Pending' });
 
-        const engagementSeries = { Frequent: [], Moderate: [], Rare: [] };
-        engagementRes.rows.forEach(row => {
-            if (engagementSeries[row.eng_level]) {
-                engagementSeries[row.eng_level].push({ year: row.year, score: parseFloat(row.score) });
-            }
-        });
+        const riskStats = await Scholar.aggregate([
+            { $match: { schoolType: level, status: 'Active' } },
+            { $lookup: {
+                from: 'academicresults',
+                localField: '_id',
+                foreignField: 'scholarId',
+                as: 'results'
+            }},
+            { $addFields: {
+                avgMark: { $avg: "$results.marks" }
+            }},
+            { $group: {
+                _id: "$schoolName",
+                avg: { $avg: "$avgMark" },
+                atrisk: { $sum: { $cond: [{ $lt: ["$avgMark", 50] }, 1, 0] } },
+                total: { $sum: 1 },
+                passed: { $sum: { $cond: [{ $gte: ["$avgMark", 50] }, 1, 0] } }
+            }},
+            { $project: {
+                name: "$_id",
+                avg: { $round: ["$avg", 1] },
+                atrisk: 1,
+                pass_rate: {
+                    $round: [
+                        { $multiply: [{ $divide: ["$passed", { $cond: [{ $eq: ["$total", 0] }, 1, "$total"] }] }, 100] },
+                        1
+                    ]
+                },
+                level: {
+                    $cond: [
+                        { $gte: ["$avg", 75] }, "low",
+                        { $cond: [{ $gte: ["$avg", 55] }, "medium", "high"] }
+                    ]
+                }
+            }},
+            { $sort: { atrisk: -1 } }
+        ]);
 
-        // 6. Risk Indicators per School
-        const riskRes = await pool.query(`
-            WITH scholar_stats AS (
-                SELECT
-                    s.id,
-                    s.school_id,
-                    COALESCE(sch.name, s.school_name, 'Unassigned Institution') as school_name,
-                    AVG(ar.marks) as avg_mark,
-                    (SELECT COUNT(*) FILTER (WHERE status = 'present')::float / NULLIF(COUNT(*), 0)::float * 100
-                     FROM attendance WHERE scholar_id = s.id) as att_rate
-                FROM scholars s
-                LEFT JOIN schools sch ON s.school_id = sch.id
-                JOIN academic_results ar ON s.id = ar.scholar_id
-                WHERE (s.school_type = $1 OR ($1 = 'University' AND s.school_type = 'Tertiary / University'))
-                  AND s.status = 'Active'
-                GROUP BY s.id, s.school_id, sch.name, s.school_name
-            )
-            SELECT
-                school_name as name,
-                AVG(avg_mark)::numeric(5,1) as avg,
-                COUNT(*) FILTER (WHERE avg_mark < 50 OR att_rate < 70) as atrisk,
-                (COUNT(*) FILTER (WHERE avg_mark >= 50)::float / NULLIF(COUNT(*), 0)::float * 100)::numeric(5,1) as pass_rate,
-                CASE
-                    WHEN AVG(avg_mark) >= 75 THEN 'low'
-                    WHEN AVG(avg_mark) >= 55 THEN 'medium'
-                    ELSE 'high'
-                END as level
-            FROM scholar_stats
-            GROUP BY school_name
-            ORDER BY atrisk DESC
-        `, [level]);
-
-        const schoolsRisks = riskRes.rows.map(r => ({
+        const schoolsRisks = riskStats.map(r => ({
             ...r,
             reason: r.level === 'low'
-                ? `Strong Institutional Integrity with ${r.pass_rate}% pass rate and consistent attendance.`
-                : (r.level === 'medium' ? `Moderate Risk: ${r.pass_rate}% pass rate. Flags on scholar attendance/marks.` : `High Alert: ${r.pass_rate}% pass rate. Multi-factor performance decline.`)
+                ? `Strong Institutional Integrity with ${r.pass_rate}% pass rate and consistent performance.`
+                : (r.level === 'medium' ? `Moderate Risk: ${r.pass_rate}% pass rate. Flags on scholar marks.` : `High Alert: ${r.pass_rate}% pass rate. Multi-factor performance decline.`)
         }));
 
-        // 7. Pending Approvals
-        const pendingScholars = await pool.query(`
-            SELECT full_name as title, 'New scholar registration pending.' as desc, created_at as time
-            FROM scholars WHERE status = 'Pending' LIMIT 3
-        `);
-        const pendingSponsors = await pool.query(`
-            SELECT name as title, 'New sponsor profile awaiting verification.' as desc, created_at as time
-            FROM sponsors WHERE status = 'Pending' LIMIT 3
-        `);
+        // 6. Engagement vs Performance Impact (Active scholars only)
+        const engagementTrends = await Attendance.aggregate([
+            { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
+            { $unwind: "$scholar" },
+            { $match: { "scholar.status": "Active", "scholar.schoolType": level } },
+            { $group: {
+                _id: "$scholarId",
+                presentCount: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+                totalCount: { $sum: 1 }
+            }},
+            { $addFields: {
+                rate: { $multiply: [{ $divide: ["$presentCount", { $cond: [{ $eq: ["$totalCount", 0] }, 1, "$totalCount"] }] }, 100] }
+            }},
+            { $addFields: {
+                group: {
+                    $cond: [
+                        { $gte: ["$rate", 80] }, "Frequent",
+                        { $cond: [{ $gte: ["$rate", 50] }, "Moderate", "Rare"] }
+                    ]
+                }
+            }},
+            { $lookup: { from: 'academicresults', localField: '_id', foreignField: 'scholarId', as: 'results' } },
+            { $unwind: "$results" },
+            { $group: {
+                _id: { group: "$group", year: "$results.year" },
+                avgScore: { $avg: "$results.marks" }
+            }},
+            { $sort: { "_id.year": 1 } }
+        ]);
 
-        const approvals = [...pendingScholars.rows, ...pendingSponsors.rows].map(a => ({
-            ...a,
-            time: formatTimeAgo(a.time)
-        }));
-
-        const pendingTotalRes = await pool.query(`
-            SELECT
-                (SELECT COUNT(*) FROM scholars WHERE status = 'Pending') +
-                (SELECT COUNT(*) FROM sponsors WHERE status = 'Pending') +
-                (SELECT COUNT(*) FROM schools WHERE status = 'Pending') +
-                (SELECT COUNT(*) FROM events WHERE status = 'Pending') as count
-        `);
+        const engagementSeries = {};
+        engagementTrends.forEach(t => {
+            if (!engagementSeries[t._id.group]) engagementSeries[t._id.group] = [];
+            engagementSeries[t._id.group].push({ year: t._id.year, score: t.avgScore.toFixed(1) });
+        });
 
         const stats = {
             summary: [
-                { label: 'Active Scholars', value: activeCountRes.rows[0].count, icon: 'groups' },
-                { label: 'Graduated', value: graduatedCountRes.rows[0].count, icon: 'award' },
-                { label: 'University', value: uniActiveRes.rows[0].count, icon: 'bank' },
-                { label: 'Secondary', value: secActiveRes.rows[0].count, icon: 'book' },
-                { label: 'Sponsors', value: sponsorsCountRes.rows[0].count, icon: 'heart' },
+                { label: 'Active Scholars', value: activeScholars, icon: 'groups' },
+                { label: 'Graduated', value: graduatedScholars, icon: 'award' },
+                { label: 'University', value: uniActive, icon: 'bank' },
+                { label: 'Secondary', value: secActive, icon: 'book' },
+                { label: 'Sponsors', value: totalSponsors, icon: 'heart' },
                 { label: 'Retention', value: `${retentionRate}%`, icon: 'trend', footnote: `${currentRetained} of ${initialTotal}` }
             ],
-            cohorts: cohortRes.rows,
-            regions: regionRes.rows,
-            performanceSeries: performanceSeries,
-            engagementSeries: engagementSeries,
-            schools: schoolsRisks,
-            approvals: approvals,
-            pendingCount: parseInt(pendingTotalRes.rows[0].count || 0)
+            system: {
+                totalUsers,
+                totalSchools,
+                backupCount
+            },
+            cohorts: cohortDistribution,
+            performanceSeries,
+            engagementSeries,
+            pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount + pPaymentsCount,
+            pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
+            approvals: approvalsSummary,
+            schools: schoolsRisks
         };
 
-        return successResponse(res, stats, 'High-fidelity dashboard analytics retrieved.');
+        return successResponse(res, stats);
     } catch (err) {
         next(err);
     }
 };
 
-const formatTimeAgo = (date) => {
-    if (!date) return 'Recently';
-    const seconds = Math.floor((new Date() - new Date(date)) / 1000);
-    let interval = seconds / 31536000;
-    if (interval > 1) return Math.floor(interval) + "y ago";
-    interval = seconds / 2592000;
-    if (interval > 1) return Math.floor(interval) + "m ago";
-    interval = seconds / 86400;
-    if (interval > 1) return Math.floor(interval) + "d ago";
-    interval = seconds / 3600;
-    if (interval > 1) return Math.floor(interval) + "h ago";
-    interval = seconds / 60;
-    if (interval > 1) return Math.floor(interval) + "m ago";
-    return Math.floor(seconds) + "s ago";
-};
-
-const districtCoordinates = {
-    'Chitipa': { lat: -9.7024, lng: 33.2687 },
-    'Karonga': { lat: -9.9333, lng: 33.9333 },
-    'Rumphi': { lat: -11.0167, lng: 33.8667 },
-    'Mzimba': { lat: -11.9000, lng: 33.6000 },
-    'Nkhata Bay': { lat: -11.6069, lng: 34.2917 },
-    'Likoma': { lat: -12.0667, lng: 34.7333 },
-    'Kasungu': { lat: -13.0333, lng: 33.4833 },
-    'Nkhotakota': { lat: -12.9167, lng: 34.2833 },
-    'Ntchisi': { lat: -13.3500, lng: 34.0000 },
-    'Dowa': { lat: -13.6500, lng: 33.9333 },
-    'Mchinji': { lat: -13.8000, lng: 32.9000 },
-    'Lilongwe': { lat: -13.9667, lng: 33.7833 },
-    'Salima': { lat: -13.7833, lng: 34.4500 },
-    'Dedza': { lat: -14.3833, lng: 34.3333 },
-    'Ntcheu': { lat: -14.8167, lng: 34.6333 },
-    'Mangochi': { lat: -14.4833, lng: 35.2667 },
-    'Balaka': { lat: -14.9833, lng: 34.9500 },
-    'Machinga': { lat: -15.1667, lng: 35.3000 },
-    'Zomba': { lat: -15.3833, lng: 35.3333 },
-    'Chiradzulu': { lat: -15.6833, lng: 35.1500 },
-    'Blantyre': { lat: -15.7833, lng: 35.0000 },
-    'Mwanza': { lat: -15.6167, lng: 34.5167 },
-    'Neno': { lat: -15.4000, lng: 34.6500 },
-    'Thyolo': { lat: -16.0667, lng: 35.1333 },
-    'Mulanje': { lat: -16.0333, lng: 35.5000 },
-    'Phalombe': { lat: -15.8000, lng: 35.6500 },
-    'Chikwawa': { lat: -16.0333, lng: 34.8000 },
-    'Nsanje': { lat: -16.9167, lng: 35.2667 },
-};
-
-/**
- * Get map data for partner districts in Malawi
- */
 const getDistrictsMapData = async (req, res, next) => {
     try {
-        const sql = `
-            SELECT
-                district,
-                COUNT(*)::int as scholar_count
-            FROM scholars
-            WHERE district IS NOT NULL AND district != ''
-              AND status NOT IN ('Graduated', 'Alumni')
-            GROUP BY district
-        `;
-        const result = await pool.query(sql);
+        const districtCoords = {
+            'Lilongwe': { lat: -13.9626, lng: 33.7741 },
+            'Blantyre': { lat: -15.7667, lng: 35.0000 },
+            'Zomba': { lat: -15.3833, lng: 35.3333 },
+            'Mzimba': { lat: -11.9000, lng: 33.6000 },
+            'Karonga': { lat: -9.9333, lng: 33.9333 },
+            'Mangochi': { lat: -14.4833, lng: 35.2667 },
+            'Dedza': { lat: -14.3333, lng: 34.3333 },
+            'Kasungu': { lat: -13.0333, lng: 33.4833 },
+            'Salima': { lat: -13.7833, lng: 34.4333 },
+            'Nkhata Bay': { lat: -11.6061, lng: 34.2941 },
+            'Chikwawa': { lat: -16.0333, lng: 34.8000 },
+            'Mulanje': { lat: -16.0316, lng: 35.5076 },
+            'Thyolo': { lat: -16.0667, lng: 35.1333 }
+        };
 
-        const mapData = result.rows.map(row => {
-            const coords = districtCoordinates[row.district] || { lat: -13.2543, lng: 34.3015 }; // Default center if not found
+        const data = await Scholar.aggregate([
+            { $match: { status: 'Active', district: { $ne: null } } },
+            { $group: { _id: "$district", count: { $sum: 1 } } }
+        ]);
+
+        const mapped = data.map(d => {
+            const coords = districtCoords[d._id] || { lat: -13.2543, lng: 34.3015 }; // Default to center of Malawi
             return {
-                district: row.district,
-                scholarCount: row.scholar_count,
+                district: d._id,
+                scholarCount: d.count,
                 latitude: coords.lat,
                 longitude: coords.lng
             };
         });
 
-        return successResponse(res, mapData, 'District map data retrieved.');
+        return successResponse(res, mapped);
     } catch (err) {
         next(err);
     }

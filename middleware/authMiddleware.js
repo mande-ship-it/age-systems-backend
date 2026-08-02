@@ -1,6 +1,5 @@
 const { verifyToken } = require('../utils/jwt');
 const { errorResponse } = require('../utils/response');
-const pool = require('../config/database');
 const Role = require('../models/Role');
 const User = require('../models/User');
 
@@ -25,7 +24,5 @@ const authMiddleware = (req, res, next) => {
     };
     next();
 };
-
-module.exports = authMiddleware;
 
 module.exports = authMiddleware;

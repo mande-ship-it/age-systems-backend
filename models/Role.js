@@ -1,78 +1,57 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class Role {
-    static async getAll() {
-        const result = await pool.query('SELECT * FROM roles ORDER BY id ASC');
-        return result.rows;
+const roleSchema = new mongoose.Schema({
+    name: { type: String, unique: true, required: true },
+    description: { type: String },
+    icon: { type: String, default: 'person' },
+    color: { type: String, default: '#4C3C32' },
+    permissions: [String],
+    isSystemRole: { type: Boolean, default: false }
+}, { timestamps: true });
+
+// Static methods for compatibility with old controller calls
+roleSchema.statics.getByName = function(name) {
+    return this.findOne({ name });
+};
+
+roleSchema.statics.getAll = async function() {
+    const roles = await this.find().sort({ name: 1 });
+    const User = mongoose.model('User');
+
+    return Promise.all(roles.map(async (role) => {
+        const count = await User.countDocuments({ roleId: role._id });
+        return {
+            ...role.toObject(),
+            user_count: count,
+            userCount: count,
+            created_at: role.createdAt
+        };
+    }));
+};
+
+roleSchema.statics.update = function(id, data) {
+    return this.findByIdAndUpdate(id, data, { new: true });
+};
+
+roleSchema.statics.delete = function(id) {
+    return this.findByIdAndDelete(id);
+};
+
+roleSchema.statics.updatePermissions = function(id, permissions) {
+    if (!Array.isArray(permissions)) {
+        // If it's the old object format, we might need to convert it or just reject it
+        // For now, let's assume we are moving to the array of strings format
+        return this.findByIdAndUpdate(id, { permissions: [] }, { new: true });
     }
+    return this.findByIdAndUpdate(id, { permissions }, { new: true });
+};
 
-    static async getAllWithCounts() {
-        const sql = `
-            SELECT r.*, COUNT(u.id)::int as user_count
-            FROM roles r
-            LEFT JOIN users u ON r.id = u.role_id
-            GROUP BY r.id
-            ORDER BY r.id ASC
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
+// Virtuals for frontend compatibility
+roleSchema.virtual('id').get(function() {
+    return this._id.toHexString();
+});
 
-    static async findById(id) {
-        const result = await pool.query('SELECT * FROM roles WHERE id = $1', [id]);
-        return result.rows[0] || null;
-    }
+roleSchema.set('toJSON', { virtuals: true });
+roleSchema.set('toObject', { virtuals: true });
 
-    static async getByName(name) {
-        if (!name) return null;
-        const result = await pool.query('SELECT * FROM roles WHERE LOWER(name) = LOWER($1)', [name.trim()]);
-        return result.rows[0] || null;
-    }
-
-    static async create({ name, description, icon, color, isSystemRole = false, permissions = {} }) {
-        const sql = `
-            INSERT INTO roles (name, description, icon, color, is_system_role, permissions)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [name, description, icon, color, isSystemRole, JSON.stringify(permissions)]);
-        return result.rows[0];
-    }
-
-    static async update(id, data) {
-        const { name, description, icon, color, permissions } = data;
-
-        let sql = 'UPDATE roles SET ';
-        const params = [];
-        const updates = [];
-        let i = 1;
-
-        if (name !== undefined) { updates.push(`name = $${i++}`); params.push(name); }
-        if (description !== undefined) { updates.push(`description = $${i++}`); params.push(description); }
-        if (icon !== undefined) { updates.push(`icon = $${i++}`); params.push(icon); }
-        if (color !== undefined) { updates.push(`color = $${i++}`); params.push(color); }
-        if (permissions !== undefined) { updates.push(`permissions = $${i++}`); params.push(JSON.stringify(permissions)); }
-
-        if (updates.length === 0) return this.findById(id);
-
-        sql += updates.join(', ');
-        sql += ` WHERE id = $${i} RETURNING *`;
-        params.push(id);
-
-        const result = await pool.query(sql, params);
-        return result.rows[0];
-    }
-
-    static async delete(id) {
-        const result = await pool.query('DELETE FROM roles WHERE id = $1 RETURNING id', [id]);
-        return result.rows[0];
-    }
-
-    static async updatePermissions(id, permissions) {
-        const sql = 'UPDATE roles SET permissions = $1 WHERE id = $2 RETURNING *';
-        const result = await pool.query(sql, [JSON.stringify(permissions), id]);
-        return result.rows[0];
-    }
-}
-
-module.exports = Role;
+module.exports = mongoose.model('Role', roleSchema);
