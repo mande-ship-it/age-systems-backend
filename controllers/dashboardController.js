@@ -176,6 +176,15 @@ const getDashboardStats = async (req, res, next) => {
             engagementSeries[t._id.group].push({ year: t._id.year, score: t.avgScore.toFixed(1) });
         });
 
+        // 7. Regional Distribution (Active scholars only)
+        const regions = await Scholar.aggregate([
+            { $match: { status: 'Active', district: { $ne: null } } },
+            { $group: { _id: "$district", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 5 },
+            { $project: { region: "$_id", count: 1, _id: 0 } }
+        ]);
+
         const stats = {
             summary: [
                 { label: 'Active Scholars', value: activeScholars, icon: 'groups' },
@@ -193,6 +202,7 @@ const getDashboardStats = async (req, res, next) => {
             cohorts: cohortDistribution,
             performanceSeries,
             engagementSeries,
+            regions,
             pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount + pPaymentsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
             approvals: approvalsSummary,
