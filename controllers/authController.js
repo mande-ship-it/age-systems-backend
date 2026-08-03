@@ -70,6 +70,8 @@ const login = async (req, res, next) => {
                 email: user.email,
                 role: user.role_name,
                 department: user.department_name,
+                profilePicture: user.profilePicture,
+                profile_picture: user.profilePicture,
                 isFirstLogin: user.isFirstLogin || isOTPLogin,
                 mustResetPassword: user.isFirstLogin || isOTPLogin
             }

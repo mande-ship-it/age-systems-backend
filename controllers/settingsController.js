@@ -102,7 +102,11 @@ const runBackup = async (req, res, next) => {
 const uploadProfilePicture = async (req, res, next) => {
     try {
         if (!req.file) return errorResponse(res, 'No file uploaded.', 400);
-        const user = await User.findByIdAndUpdate(req.user.id, { profilePicture: req.file.path }, { new: true });
+
+        // Normalize path for web (replace backslashes with forward slashes)
+        const normalizedPath = req.file.path.replace(/\\/g, '/');
+
+        const user = await User.findByIdAndUpdate(req.user.id, { profilePicture: normalizedPath }, { new: true });
         return successResponse(res, user, 'Profile picture updated.');
     } catch (err) {
         next(err);

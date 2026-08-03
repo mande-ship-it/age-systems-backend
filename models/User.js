@@ -58,6 +58,10 @@ userSchema.virtual('last_login').get(function() {
     return this.lastLogin;
 });
 
+userSchema.virtual('profile_picture').get(function() {
+    return this.profilePicture;
+});
+
 userSchema.set('toJSON', { virtuals: true });
 userSchema.set('toObject', { virtuals: true });
 
