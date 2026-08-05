@@ -78,6 +78,7 @@ const login = async (req, res, next) => {
                 assignedDistrict: user.assignedDistrict,
                 profilePicture: user.profilePicture,
                 profile_picture: user.profilePicture,
+                permissions: user.roleId ? user.roleId.permissions : [],
                 isFirstLogin: user.isFirstLogin || isOTPLogin,
                 mustResetPassword: user.isFirstLogin || isOTPLogin
             }
