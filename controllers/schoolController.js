@@ -4,6 +4,7 @@ const Scholar = require('../models/Scholar');
 const AcademicResult = require('../models/AcademicResult');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
+const { applyDistrictFilter } = require('../utils/districtFilter');
 
 /**
  * School Management
@@ -13,6 +14,12 @@ const createSchool = async (req, res, next) => {
         const { code, name, postal } = req.body;
 
         const schoolData = { ...req.body };
+
+        // Security: Field Officers can only register schools for their own district
+        if (req.user && req.user.role && req.user.role.toLowerCase().includes('field') && req.user.assignedDistrict) {
+            schoolData.district = req.user.assignedDistrict;
+        }
+
         if (postal && !schoolData.postalAddress) schoolData.postalAddress = postal;
 
         if (code) {
@@ -36,7 +43,8 @@ const createSchool = async (req, res, next) => {
 
 const getAllSchools = async (req, res, next) => {
     try {
-        const schools = await School.find().sort({ name: 1 });
+        const query = applyDistrictFilter(req);
+        const schools = await School.find(query).sort({ name: 1 });
         return successResponse(res, schools, 'Schools list retrieved.');
     } catch (err) {
         next(err);

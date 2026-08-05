@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
     location: { type: String },
     bio: { type: String },
     profilePicture: { type: String },
+    assignedDistrict: { type: String },
     isActive: { type: Boolean, default: true },
     isFirstLogin: { type: Boolean, default: true },
     otpCode: { type: String },

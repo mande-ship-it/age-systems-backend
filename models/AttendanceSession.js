@@ -6,6 +6,7 @@ const attendanceSessionSchema = new mongoose.Schema({
     sessionDate: { type: Date, required: true, default: Date.now },
     facilitator: { type: String },
     location: { type: String },
+    district: { type: String },
     month: { type: String },
     weekNumber: { type: Number },
     year: { type: Number },
@@ -18,6 +19,7 @@ attendanceSessionSchema.statics.getAll = function(filters = {}) {
 
     if (filters.type) query = query.where('type').equals(filters.type);
     if (filters.schoolId) query = query.where('schoolId').equals(filters.schoolId);
+    if (filters.district) query = query.where('district').equals(filters.district);
     if (filters.month) query = query.where('month').equals(filters.month);
     if (filters.weekNumber) query = query.where('weekNumber').equals(filters.weekNumber);
     if (filters.term) query = query.where('term').equals(filters.term);

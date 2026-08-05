@@ -76,6 +76,7 @@ const createUser = async (req, res, next) => {
             passwordHash,
             roleId: role?._id,
             departmentId: dept?._id,
+            assignedDistrict: req.body.assignedDistrict,
             otpCode,
             otpExpiry,
             isFirstLogin: true
@@ -147,6 +148,21 @@ const deleteUser = async (req, res, next) => {
     }
 };
 
+const getActiveUsers = async (req, res, next) => {
+    try {
+        // Return users who have logged in, sorted by most recent first
+        const users = await User.find({ lastLogin: { $ne: null } })
+            .select('fullName username lastLogin profilePicture email roleId')
+            .populate('roleId', 'name')
+            .sort({ lastLogin: -1 })
+            .limit(10);
+
+        return successResponse(res, users, 'Active users retrieved.');
+    } catch (err) {
+        next(err);
+    }
+};
+
 const getDirector = async (req, res, next) => {
     try {
         // Try to find a user with 'Director' in their name
@@ -173,5 +189,6 @@ module.exports = {
     createUser,
     updateUser,
     deleteUser,
-    getDirector
+    getDirector,
+    getActiveUsers
 };

@@ -25,7 +25,7 @@ const fs = require('fs');
 // Multer Config for Profile Pictures
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const dir = './uploads/profiles';
+        const dir = path.join(__dirname, '..', 'uploads', 'profiles');
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }

@@ -53,7 +53,12 @@ const login = async (req, res, next) => {
 
         // Generate Token
         const token = jwt.sign(
-            { id: user._id, role: user.role_name, fullName: user.fullName },
+            {
+                id: user._id,
+                role: user.role_name,
+                fullName: user.fullName,
+                assignedDistrict: user.assignedDistrict
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -70,6 +75,7 @@ const login = async (req, res, next) => {
                 email: user.email,
                 role: user.role_name,
                 department: user.department_name,
+                assignedDistrict: user.assignedDistrict,
                 profilePicture: user.profilePicture,
                 profile_picture: user.profilePicture,
                 isFirstLogin: user.isFirstLogin || isOTPLogin,

@@ -7,13 +7,15 @@ const Internship = require('../models/Internship');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 const mongoose = require('mongoose');
+const { applyDistrictFilter } = require('../utils/districtFilter');
 
 /**
  * Get all scholars
  */
 const getAllScholars = async (req, res, next) => {
     try {
-        const scholars = await Scholar.getAll();
+        const query = applyDistrictFilter(req);
+        const scholars = await Scholar.find(query).populate('schoolId sponsorId userId').sort({ fullName: 1 });
         return successResponse(res, scholars);
     } catch (err) {
         next(err);
@@ -26,9 +28,17 @@ const getAllScholars = async (req, res, next) => {
 const getScholarById = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const scholar = await Scholar.getById(id);
 
-        if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
+        // Apply District Security
+        const query = applyDistrictFilter(req, { _id: mongoose.Types.ObjectId.isValid(id) ? id : null });
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            query.scholarId = id;
+            delete query._id;
+        }
+
+        const scholar = await Scholar.findOne(query).populate('schoolId sponsorId userId');
+
+        if (!scholar) return errorResponse(res, 'Scholar not found or access denied for this district.', 404);
 
         // Fetch all related data in parallel
         const [results, documents, payments, attendance, internship] = await Promise.all([
@@ -76,6 +86,18 @@ const getScholarById = async (req, res, next) => {
 const createScholar = async (req, res, next) => {
     try {
         const scholarData = { ...req.body };
+
+        // Security: Field Officers can only register scholars for their own district
+        if (req.user && req.user.role && req.user.role.toLowerCase().includes('field')) {
+            if (req.user.assignedDistrict) {
+                scholarData.district = req.user.assignedDistrict;
+            }
+
+            // Restriction: Field Officers can only register Secondary School scholars
+            if (scholarData.schoolType !== 'Secondary') {
+                return errorResponse(res, 'Access denied. Field Officers are restricted to registering secondary school scholars only.', 403);
+            }
+        }
 
         // Handle name mapping for frontend compatibility
         if (scholarData.name && !scholarData.fullName) {
@@ -170,7 +192,9 @@ const deleteScholar = async (req, res, next) => {
 const getScholarsBySchool = async (req, res, next) => {
     try {
         const { schoolId } = req.query;
-        const scholars = await Scholar.find({ schoolId }).sort({ fullName: 1 });
+        const query = applyDistrictFilter(req, { schoolId });
+
+        const scholars = await Scholar.find(query).sort({ fullName: 1 });
         return successResponse(res, scholars);
     } catch (err) {
         next(err);

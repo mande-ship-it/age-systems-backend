@@ -5,6 +5,8 @@ const mongoose = require('mongoose');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
+const { applyDistrictFilter } = require('../utils/districtFilter');
+
 const calculateGrade = (marks, isUniversity) => {
     if (isUniversity) {
         if (marks >= 75) return { letter: 'A', point: 4.00 };
@@ -30,6 +32,12 @@ const calculateGrade = (marks, isUniversity) => {
 const recordResults = async (req, res, next) => {
     try {
         const { scholarId, results, year, term, semester, schoolType } = req.body;
+
+        // Permission check: Only Field Officers can enter results
+        const userRole = (req.user?.role || '').toLowerCase();
+        if (!userRole.includes('field')) {
+            return errorResponse(res, 'Access denied. Only Field Officers are permitted to enter results.', 403);
+        }
 
         // Ensure scholar is active
         const scholar = await Scholar.findById(scholarId);
@@ -86,12 +94,18 @@ const getScholarResults = async (req, res, next) => {
             return errorResponse(res, 'Scholar ID is required.', 400);
         }
 
-        // If it's not a valid ObjectId, try finding the scholar by their string ID (e.g., AGE-001)
-        if (!mongoose.Types.ObjectId.isValid(scholarId)) {
-            const scholar = await Scholar.findOne({ scholarId: scholarId });
-            if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
-            scholarId = scholar._id;
+        // Apply District Filter to find the scholar first
+        const scholarQuery = applyDistrictFilter(req);
+        if (mongoose.Types.ObjectId.isValid(scholarId)) {
+            scholarQuery._id = scholarId;
+        } else {
+            scholarQuery.scholarId = scholarId;
         }
+
+        const scholar = await Scholar.findOne(scholarQuery);
+        if (!scholar) return errorResponse(res, 'Scholar not found or access denied.', 404);
+
+        scholarId = scholar._id;
 
         const results = await AcademicResult.find({ scholarId, ...(year && { year }) })
             .populate('subjectId')
@@ -140,13 +154,18 @@ const getSchoolResults = async (req, res, next) => {
     try {
         const { schoolId, year } = req.query;
         const filter = {};
+
+        const scholarFilter = applyDistrictFilter(req);
         if (schoolId) {
             if (!mongoose.Types.ObjectId.isValid(schoolId)) {
                 return errorResponse(res, 'Invalid School ID.', 400);
             }
-            const scholars = await Scholar.find({ schoolId }).select('_id');
-            filter.scholarId = { $in: scholars.map(s => s._id) };
+            scholarFilter.schoolId = new mongoose.Types.ObjectId(schoolId);
         }
+
+        const scholars = await Scholar.find(scholarFilter).select('_id');
+        filter.scholarId = { $in: scholars.map(s => s._id) };
+
         if (year) filter.year = parseInt(year);
 
         const results = await AcademicResult.find(filter)
@@ -172,8 +191,12 @@ const getSchoolResults = async (req, res, next) => {
 const getYearlyStats = async (req, res, next) => {
     try {
         const { year } = req.params;
+        const filter = { year: parseInt(year) };
+
+        const scholarFilter = applyDistrictFilter(req);
+
         const stats = await AcademicResult.aggregate([
-            { $match: { year: parseInt(year) } },
+            { $match: filter },
             { $group: {
                 _id: "$scholarId",
                 avgMark: { $avg: "$marks" },
@@ -185,7 +208,10 @@ const getYearlyStats = async (req, res, next) => {
                 foreignField: '_id',
                 as: 'scholar'
             }},
-            { $unwind: '$scholar' }
+            { $unwind: '$scholar' },
+            { $match: {
+                ...(scholarFilter.district ? { "scholar.district": scholarFilter.district } : {})
+            }}
         ]);
         return successResponse(res, stats);
     } catch (err) {
@@ -225,7 +251,10 @@ const checkResultCompleteness = async (req, res, next) => {
 const getSchoolsWithResults = async (req, res, next) => {
     try {
         const scholarIdsWithResults = await AcademicResult.distinct('scholarId');
-        const scholars = await Scholar.find({ _id: { $in: scholarIdsWithResults } })
+
+        const query = applyDistrictFilter(req, { _id: { $in: scholarIdsWithResults } });
+
+        const scholars = await Scholar.find(query)
             .populate('schoolId')
             .select('schoolId schoolName');
 

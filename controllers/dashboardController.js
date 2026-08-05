@@ -9,26 +9,29 @@ const User = require('../models/User');
 const Backup = require('../models/Backup');
 const { successResponse } = require('../utils/response');
 const mongoose = require('mongoose');
+const { applyDistrictFilter } = require('../utils/districtFilter');
 
 const getDashboardStats = async (req, res, next) => {
     try {
         const { level = 'University', schoolId } = req.query;
 
+        const baseFilter = applyDistrictFilter(req);
+
         // 1. Unified Summary Counts
         const [totalScholars, activeScholars, graduatedScholars, uniActive, secActive, totalSponsors, totalUsers, totalSchools, backupCount] = await Promise.all([
-            Scholar.countDocuments(),
-            Scholar.countDocuments({ status: 'Active' }),
-            Scholar.countDocuments({ status: { $in: ['Graduated', 'Alumni'] } }),
-            Scholar.countDocuments({ status: 'Active', schoolType: 'University' }),
-            Scholar.countDocuments({ status: 'Active', schoolType: 'Secondary' }),
+            Scholar.countDocuments(baseFilter),
+            Scholar.countDocuments({ ...baseFilter, status: 'Active' }),
+            Scholar.countDocuments({ ...baseFilter, status: { $in: ['Graduated', 'Alumni'] } }),
+            Scholar.countDocuments({ ...baseFilter, status: 'Active', schoolType: 'University' }),
+            Scholar.countDocuments({ ...baseFilter, status: 'Active', schoolType: 'Secondary' }),
             Sponsor.countDocuments(),
             User.countDocuments(),
-            School.countDocuments(),
+            School.countDocuments(baseFilter), // Schools also have district
             Backup.countDocuments()
         ]);
 
         // 2. Retention Analytics
-        const retentionFilter = { schoolType: level };
+        const retentionFilter = { ...baseFilter, schoolType: level };
         if (schoolId) retentionFilter.schoolId = mongoose.Types.ObjectId(schoolId);
 
         const retentionStats = await Scholar.aggregate([
@@ -46,7 +49,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 3. Cohort Distribution (last 4 active cohorts)
         const cohortDistribution = await Scholar.aggregate([
-            { $match: { schoolType: level, status: 'Active', startYear: { $ne: null } } },
+            { $match: { ...baseFilter, schoolType: level, status: 'Active', startYear: { $ne: null } } },
             { $group: { _id: "$startYear", count: { $sum: 1 } } },
             { $sort: { _id: -1 } },
             { $limit: 4 },
@@ -54,13 +57,17 @@ const getDashboardStats = async (req, res, next) => {
         ]);
 
         // 4. Institutional Performance Trends
-        const trendsMatch = { schoolType: level, status: 'Active' };
+        const trendsMatch = { ...baseFilter, schoolType: level, status: 'Active' };
         if (schoolId) trendsMatch.schoolId = mongoose.Types.ObjectId(schoolId);
 
         const performanceTrends = await AcademicResult.aggregate([
             { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
             { $unwind: "$scholar" },
-            { $match: { "scholar.schoolType": level, "scholar.status": "Active" } },
+            { $match: {
+                "scholar.schoolType": level,
+                "scholar.status": "Active",
+                ...(baseFilter.district ? { "scholar.district": baseFilter.district } : {})
+            } },
             { $group: {
                 _id: { year: "$year", school: "$scholar.schoolName" },
                 avgMarks: { $avg: "$marks" }
@@ -77,7 +84,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 5. Pending Total & Summary
         const [pendingScholars, pendingEvents, pendingPayments] = await Promise.all([
-            Scholar.find({ status: 'Pending' }).limit(5),
+            Scholar.find({ ...baseFilter, status: 'Pending' }).limit(5),
             Event.find({ status: 'Pending' }).limit(5),
             Payment.find({ status: 'Pending' }).limit(5)
         ]);
@@ -91,12 +98,12 @@ const getDashboardStats = async (req, res, next) => {
         }
         pendingEvents.forEach(e => approvalsSummary.push({ title: 'New Event Proposal', desc: e.title, time: 'Action Required', type: 'event' }));
 
-        const pScholarsCount = await Scholar.countDocuments({ status: 'Pending' });
+        const pScholarsCount = await Scholar.countDocuments({ ...baseFilter, status: 'Pending' });
         const pEventsCount = await Event.countDocuments({ status: 'Pending' });
         const pPaymentsCount = await Payment.countDocuments({ status: 'Pending' });
 
         const riskStats = await Scholar.aggregate([
-            { $match: { schoolType: level, status: 'Active' } },
+            { $match: { ...baseFilter, schoolType: level, status: 'Active' } },
             { $lookup: {
                 from: 'academicresults',
                 localField: '_id',
@@ -144,7 +151,11 @@ const getDashboardStats = async (req, res, next) => {
         const engagementTrends = await Attendance.aggregate([
             { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
             { $unwind: "$scholar" },
-            { $match: { "scholar.status": "Active", "scholar.schoolType": level } },
+            { $match: {
+                "scholar.status": "Active",
+                "scholar.schoolType": level,
+                ...(baseFilter.district ? { "scholar.district": baseFilter.district } : {})
+            } },
             { $group: {
                 _id: "$scholarId",
                 presentCount: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
@@ -178,7 +189,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 7. Regional Distribution (Active scholars only)
         const regions = await Scholar.aggregate([
-            { $match: { status: 'Active', district: { $ne: null } } },
+            { $match: { ...baseFilter, status: 'Active', district: { $ne: null } } },
             { $group: { _id: "$district", count: { $sum: 1 } } },
             { $sort: { count: -1 } },
             { $limit: 5 },
@@ -187,11 +198,11 @@ const getDashboardStats = async (req, res, next) => {
 
         const stats = {
             summary: [
-                { label: 'Active Scholars', value: activeScholars, icon: 'groups' },
+                { label: 'Total Scholars', value: totalScholars, icon: 'groups' },
+                { label: 'Active Scholars', value: activeScholars, icon: 'check_circle' },
                 { label: 'Graduated', value: graduatedScholars, icon: 'award' },
                 { label: 'University', value: uniActive, icon: 'bank' },
                 { label: 'Secondary', value: secActive, icon: 'book' },
-                { label: 'Sponsors', value: totalSponsors, icon: 'heart' },
                 { label: 'Retention', value: `${retentionRate}%`, icon: 'trend', footnote: `${currentRetained} of ${initialTotal}` }
             ],
             system: {

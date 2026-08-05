@@ -103,8 +103,14 @@ const uploadProfilePicture = async (req, res, next) => {
     try {
         if (!req.file) return errorResponse(res, 'No file uploaded.', 400);
 
-        // Normalize path for web (replace backslashes with forward slashes)
-        const normalizedPath = req.file.path.replace(/\\/g, '/');
+        // Normalize path for web: replace backslashes and remove leading ./ or /
+        let normalizedPath = req.file.path.replace(/\\/g, '/');
+        if (normalizedPath.startsWith('./')) {
+            normalizedPath = normalizedPath.substring(2);
+        }
+        if (normalizedPath.startsWith('/')) {
+            normalizedPath = normalizedPath.substring(1);
+        }
 
         const user = await User.findByIdAndUpdate(req.user.id, { profilePicture: normalizedPath }, { new: true });
         return successResponse(res, user, 'Profile picture updated.');

@@ -39,7 +39,22 @@ async function seed() {
             { name: 'Administrator', description: 'Full system access.', icon: 'shield_rounded', color: '#9C27B0', isSystemRole: true },
             { name: 'Program Manager', description: 'Oversees program data.', icon: 'supervisor_account_rounded', color: '#2196F3', isSystemRole: true },
             { name: 'Data Officer', description: 'Manages data entry.', icon: 'storage_rounded', color: '#009688', isSystemRole: true },
-            { name: 'Scholar', description: 'Student profile.', icon: 'school_rounded', color: '#4CAF50', isSystemRole: true }
+            { name: 'Scholar', description: 'Student profile.', icon: 'school_rounded', color: '#4CAF50', isSystemRole: true },
+            {
+                name: 'Field Officer',
+                description: 'Field operations and scholar data tracking.',
+                icon: 'explore_rounded',
+                color: '#E05B1C',
+                isSystemRole: true,
+                permissions: [
+                    'scholars.view',
+                    'scholars.create',
+                    'academics.view',
+                    'academics.record',
+                    'attendance.view',
+                    'attendance.record'
+                ]
+            }
         ]);
         console.log('✅ Roles seeded.');
 

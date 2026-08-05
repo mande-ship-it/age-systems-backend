@@ -7,7 +7,8 @@ const {
     createUser,
     updateUser,
     deleteUser,
-    getDirector
+    getDirector,
+    getActiveUsers
 } = require('../controllers/userController');
 
 const { createUserRules } = require('../validations/userValidation');
@@ -17,6 +18,7 @@ const authorize = require('../middleware/roleMiddleware');
 
 // User Management (Admin only)
 router.get('/', auth, authorize(['Admin', 'Country Director']), getAllUsers);
+router.get('/active', auth, authorize(['Admin', 'Country Director']), getActiveUsers);
 router.get('/director', getDirector);
 router.get('/:id', auth, authorize(['Admin', 'Country Director']), getUserById);
 router.post('/', auth, authorize(['Admin', 'Country Director']), createUserRules, validate, createUser);

@@ -3,6 +3,7 @@ const AttendanceSession = require('../models/AttendanceSession');
 const Attendance = require('../models/Attendance');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
+const { applyDistrictFilter } = require('../utils/districtFilter');
 
 /**
  * Record a new attendance session
@@ -10,6 +11,32 @@ const NotificationService = require('../utils/notificationService');
 const recordSession = async (req, res, next) => {
     try {
         const { entries, ...sessionData } = req.body;
+
+        const userRole = (req.user?.role || '').toLowerCase();
+        const isFieldOfficer = userRole.includes('field');
+
+        // Permission check: Only Field Officers can mark attendance
+        if (!isFieldOfficer) {
+            return errorResponse(res, 'Access denied. Only Field Officers are permitted to mark attendance.', 403);
+        }
+
+        // Resolve district from the school
+        if (sessionData.schoolId) {
+            const School = require('../models/School');
+            const school = await School.findById(sessionData.schoolId);
+            if (school) {
+                // Security check for field officers
+                if (isFieldOfficer && req.user.assignedDistrict && school.district !== req.user.assignedDistrict) {
+                    return errorResponse(res, 'Access denied. You can only record attendance for schools in your assigned district.', 403);
+                }
+                sessionData.district = school.district;
+            }
+        }
+
+        // Final enforcement for field officers
+        if (isFieldOfficer && req.user.assignedDistrict) {
+            sessionData.district = req.user.assignedDistrict;
+        }
 
         const session = new AttendanceSession(sessionData);
         await session.save();
@@ -34,7 +61,8 @@ const recordSession = async (req, res, next) => {
 
 const getHistory = async (req, res, next) => {
     try {
-        const history = await AttendanceSession.getAll(req.query);
+        const filters = applyDistrictFilter(req, req.query);
+        const history = await AttendanceSession.getAll(filters);
 
         // Add present/total counts for each session
         const enrichedHistory = await Promise.all(history.map(async (s) => {

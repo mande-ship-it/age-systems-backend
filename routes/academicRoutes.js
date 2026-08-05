@@ -19,21 +19,21 @@ const auth = require('../middleware/authMiddleware');
 const authorize = require('../middleware/roleMiddleware');
 
 // Results Recording
-router.post('/record', recordResultsRules, validate, recordResults);
+router.post('/record', auth, recordResultsRules, validate, recordResults);
 
 // Results Retrieval & Analysis
-router.get('/results', getScholarResults);
-router.get('/results/by-school', getSchoolResults);
-router.get('/completeness/:scholarId/:year', checkResultCompleteness);
-router.get('/scholar/:scholarId', getScholarResults);
-router.get('/stats/:year', getYearlyStats);
+router.get('/results', auth, getScholarResults);
+router.get('/results/by-school', auth, getSchoolResults);
+router.get('/completeness/:scholarId/:year', auth, checkResultCompleteness);
+router.get('/scholar/:scholarId', auth, getScholarResults);
+router.get('/stats/:year', auth, getYearlyStats);
 
 // School lookup for results view
-router.get('/schools-with-results', getSchoolsWithResults);
+router.get('/schools-with-results', auth, getSchoolsWithResults);
 
 // Subject Registry
-router.get('/subjects', getSubjectRegistry);
-router.post('/subjects', createSubjectRules, validate, createSubject);
-router.delete('/subjects/:id', deleteSubject);
+router.get('/subjects', auth, getSubjectRegistry);
+router.post('/subjects', auth, createSubjectRules, validate, createSubject);
+router.delete('/subjects/:id', auth, deleteSubject);
 
 module.exports = router;

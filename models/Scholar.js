@@ -43,8 +43,16 @@ const scholarSchema = new mongoose.Schema({
 // Pre-validate hook to generate scholarId if missing and sync academic fields
 scholarSchema.pre('validate', async function() {
     if (!this.scholarId) {
-        const count = await this.constructor.countDocuments({ scholarId: /^AGE-/ });
-        this.scholarId = `AGE-${(count + 1).toString().padStart(3, '0')}`;
+        const latest = await this.constructor.findOne({ scholarId: /^AGE-\d+$/ })
+            .sort({ scholarId: -1 });
+        let nextNum = 1;
+        if (latest && latest.scholarId) {
+            const match = latest.scholarId.match(/^AGE-(\d+)$/);
+            if (match) {
+                nextNum = parseInt(match[1], 10) + 1;
+            }
+        }
+        this.scholarId = `AGE-${nextNum.toString().padStart(3, '0')}`;
     }
 
     // Sync academicYear and currentClass
