@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: scholar-management-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false # Set this in Render Dashboard
+      - key: JWT_SECRET
+        generateValue: true
+      - key: BREVO_API_KEY
+        sync: false # Set this in Render Dashboard
+      - key: FRONTEND_URL
+        value: https://your-app-name.onrender.com
