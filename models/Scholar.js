@@ -173,6 +173,20 @@ scholarSchema.statics.autoTransitionGraduates = async function() {
     return graduates;
 };
 
+scholarSchema.statics.approve = function(id) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+        return this.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
+    }
+    return this.findOneAndUpdate({ scholarId: id }, { status: 'Active' }, { new: true });
+};
+
+scholarSchema.statics.delete = function(id) {
+    if (mongoose.Types.ObjectId.isValid(id)) {
+        return this.findByIdAndDelete(id);
+    }
+    return this.findOneAndDelete({ scholarId: id });
+};
+
 scholarSchema.set('toJSON', { virtuals: true });
 scholarSchema.set('toObject', { virtuals: true });
 

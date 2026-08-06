@@ -23,64 +23,6 @@ eventSchema.statics.getAll = function(status = null) {
     return this.find(filter).sort({ eventDate: 1, eventTime: 1 });
 };
 
-eventSchema.statics.getEventsInDays = function(days) {
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + days);
-    targetDate.setHours(0, 0, 0, 0);
-
-    const nextDate = new Date(targetDate);
-    nextDate.setDate(nextDate.getDate() + 1);
-
-    return this.find({
-        eventDate: {
-            $gte: targetDate,
-            $lt: nextDate
-        },
-        status: 'Active'
-    });
-};
-
-eventSchema.statics.cleanupHistory = async function() {
-    const twoDaysAgo = new Date();
-    twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
-
-    const expiredEvents = await this.find({
-        status: 'History',
-        eventDate: { $lt: twoDaysAgo }
-    });
-
-    if (expiredEvents.length > 0) {
-        await this.deleteMany({
-            _id: { $in: expiredEvents.map(e => e._id) }
-        });
-    }
-
-    return expiredEvents;
-};
-
-eventSchema.statics.autoMoveToHistory = async function() {
-    const now = new Date();
-
-    // We fetch all active events and manually check if their combined date/time has passed
-    const activeEvents = await this.find({ status: 'Active' });
-    const pastEvents = [];
-
-    for (const event of activeEvents) {
-        const [hours, minutes] = event.eventTime.split(':').map(Number);
-        const combinedDateTime = new Date(event.eventDate);
-        combinedDateTime.setHours(hours, minutes, 0, 0);
-
-        if (combinedDateTime < now) {
-            event.status = 'History';
-            event.completedAt = now;
-            await event.save();
-            pastEvents.push(event);
-        }
-    }
-
-    return pastEvents;
-};
-
 eventSchema.statics.approve = function(id) {
     return this.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
 };

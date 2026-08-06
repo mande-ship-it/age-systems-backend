@@ -13,12 +13,20 @@ paymentSchema.statics.getAll = function(status = null) {
     return this.find(filter).populate('scholarId').sort({ createdAt: -1 });
 };
 
+paymentSchema.statics.getByScholar = function(scholarId) {
+    return this.find({ scholarId }).sort({ paymentDate: -1 });
+};
+
 paymentSchema.statics.approve = function(id) {
     return this.findByIdAndUpdate(id, { status: 'Completed' }, { new: true });
 };
 
 paymentSchema.statics.reject = function(id) {
     return this.findByIdAndUpdate(id, { status: 'Failed' }, { new: true });
+};
+
+paymentSchema.statics.delete = function(id) {
+    return this.findByIdAndDelete(id);
 };
 
 module.exports = mongoose.model('Payment', paymentSchema);
