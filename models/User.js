@@ -1,69 +1,96 @@
-const mongoose = require('mongoose');
+const pool = require('../config/database');
 
-const userSchema = new mongoose.Schema({
-    email: { type: String, unique: true, required: true, lowercase: true },
-    username: { type: String, unique: true, required: true, lowercase: true },
-    passwordHash: { type: String, required: true },
-    roleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Role' },
-    departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
-    fullName: { type: String, required: true },
-    phone: { type: String },
-    location: { type: String },
-    bio: { type: String },
-    profilePicture: { type: String },
-    assignedDistrict: { type: String },
-    isActive: { type: Boolean, default: true },
-    isFirstLogin: { type: Boolean, default: true },
-    otpCode: { type: String },
-    otpExpiry: { type: Date },
-    lastLogin: { type: Date },
-    notes: { type: String }
-}, { timestamps: true });
+class User {
+    static async create({
+        email, username, passwordHash, roleId, departmentId, fullName, phone, isActive = true
+    }) {
+        const sql = `
+            INSERT INTO users (email, username, password_hash, role_id, department_id, full_name, phone, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING *
+        `;
+        const result = await pool.query(sql, [
+            email.toLowerCase(), username.toLowerCase(), passwordHash, roleId || null, departmentId || null, fullName, phone, isActive
+        ]);
+        return result.rows[0];
+    }
 
-// Static methods for compatibility
-userSchema.statics.findByEmail = function(email) {
-    return this.findOne({ email: email.toLowerCase() }).populate('roleId departmentId');
-};
+    static async findByEmail(email) {
+        const sql = `
+            SELECT u.*, r.name as role_name, d.name as department_name
+            FROM users u
+            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE LOWER(u.email) = $1
+        `;
+        const result = await pool.query(sql, [email.toLowerCase()]);
+        return result.rows[0] || null;
+    }
 
-userSchema.statics.findById = function(id) {
-    if (!mongoose.Types.ObjectId.isValid(id)) return null;
-    return this.findOne({ _id: id }).populate('roleId departmentId');
-};
+    static async findByUsername(username) {
+        const sql = `
+            SELECT u.*, r.name as role_name, d.name as department_name
+            FROM users u
+            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE LOWER(u.username) = $1
+        `;
+        const result = await pool.query(sql, [username.toLowerCase()]);
+        return result.rows[0] || null;
+    }
 
-userSchema.statics.getAll = function() {
-    return this.find().populate('roleId departmentId').sort({ createdAt: -1 });
-};
+    static async findById(id) {
+        const sql = `
+            SELECT u.*, r.name as role_name, d.name as department_name
+            FROM users u
+            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            WHERE u.id = $1
+        `;
+        const result = await pool.query(sql, [id]);
+        return result.rows[0] || null;
+    }
 
-// Aliasing for old controller calls that expect camelCase or certain structure
-userSchema.virtual('role_name').get(function() {
-    return this.roleId ? this.roleId.name : 'User';
-});
+    static async getAll() {
+        const sql = `
+            SELECT u.*, r.name as role_name, d.name as department_name
+            FROM users u
+            LEFT JOIN roles r ON u.role_id = r.id
+            LEFT JOIN departments d ON u.department_id = d.id
+            ORDER BY u.created_at DESC
+        `;
+        const result = await pool.query(sql);
+        return result.rows;
+    }
 
-userSchema.virtual('department_name').get(function() {
-    return this.departmentId ? this.departmentId.name : null;
-});
+    static async update(id, data) {
+        const fields = [];
+        const values = [];
+        let index = 1;
 
-userSchema.virtual('full_name').get(function() {
-    return this.fullName;
-});
+        for (const [key, value] of Object.entries(data)) {
+            const dbKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+            fields.push(`${dbKey} = $${index++}`);
+            values.push(value);
+        }
 
-userSchema.virtual('is_active').get(function() {
-    return this.isActive;
-});
+        if (fields.length === 0) return this.findById(id);
 
-userSchema.virtual('created_at').get(function() {
-    return this.createdAt;
-});
+        values.push(id);
+        const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = $${index} RETURNING *`;
+        const result = await pool.query(sql, values);
+        return result.rows[0];
+    }
 
-userSchema.virtual('last_login').get(function() {
-    return this.lastLogin;
-});
+    static async delete(id) {
+        const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
+        return result.rows[0];
+    }
 
-userSchema.virtual('profile_picture').get(function() {
-    return this.profilePicture;
-});
+    static async setOTP(userId, otp, expiry) {
+        const sql = 'UPDATE users SET otp_code = $1, otp_expiry = $2 WHERE id = $3';
+        await pool.query(sql, [otp, expiry, userId]);
+    }
+}
 
-userSchema.set('toJSON', { virtuals: true });
-userSchema.set('toObject', { virtuals: true });
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = User;

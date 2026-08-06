@@ -1,34 +1,66 @@
-const mongoose = require('mongoose');
+const pool = require('../config/database');
 
-const sponsorSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    name: { type: String, required: true },
-    organization: { type: String },
-    email: { type: String, lowercase: true },
-    phone: { type: String },
-    contactPerson: { type: String },
-    sponsorshipType: { type: String, default: 'Standard' }, // Platinum, Gold, Silver, Bronze, In-Kind
-    amount: { type: Number, default: 0 },
-    registrationDate: { type: Date, default: Date.now },
-    address: { type: String },
-    notes: { type: String },
-    status: { type: String, default: 'Pending' } // Active, Inactive, Pending
-}, { timestamps: true });
+class Sponsor {
+    static async create(data) {
+        const { userId, name, organization, email, phone, contactPerson, sponsorshipType, amount, address, notes, status = 'Pending' } = data;
+        const sql = `
+            INSERT INTO sponsors (user_id, name, organization, email, phone, contact_person, sponsorship_type, amount, address, notes, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            RETURNING *
+        `;
+        const values = [userId || null, name, organization, email, phone, contactPerson, sponsorshipType, amount || 0, address, notes, status];
+        const result = await pool.query(sql, values);
+        return result.rows[0];
+    }
 
-sponsorSchema.statics.getAll = function() {
-    return this.find().sort({ name: 1 });
-};
+    static async getAll(status = null) {
+        let sql = 'SELECT * FROM sponsors';
+        const params = [];
+        if (status) {
+            sql += ' WHERE status = $1';
+            params.push(status);
+        }
+        sql += ' ORDER BY name ASC';
+        const result = await pool.query(sql, params);
+        return result.rows;
+    }
 
-sponsorSchema.statics.getByName = function(name) {
-    return this.findOne({ name: new RegExp(`^${name}$`, 'i') });
-};
+    static async getByName(name) {
+        const sql = 'SELECT * FROM sponsors WHERE name ILIKE $1';
+        const result = await pool.query(sql, [name]);
+        return result.rows[0] || null;
+    }
 
-// Virtuals for frontend compatibility (snake_case)
-sponsorSchema.virtual('contact_person').get(function() { return this.contactPerson; });
-sponsorSchema.virtual('sponsorship_type').get(function() { return this.sponsorshipType; });
-sponsorSchema.virtual('registration_date').get(function() { return this.registrationDate; });
+    static async findById(id) {
+        const sql = 'SELECT * FROM sponsors WHERE id = $1';
+        const result = await pool.query(sql, [id]);
+        return result.rows[0] || null;
+    }
 
-sponsorSchema.set('toJSON', { virtuals: true });
-sponsorSchema.set('toObject', { virtuals: true });
+    static async update(id, data) {
+        const fields = [];
+        const values = [];
+        let index = 1;
 
-module.exports = mongoose.model('Sponsor', sponsorSchema);
+        for (const [key, value] of Object.entries(data)) {
+            const dbKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+            fields.push(`${dbKey} = $${index++}`);
+            values.push(value);
+        }
+
+        if (fields.length === 0) return this.findById(id);
+
+        values.push(id);
+        const sql = `UPDATE sponsors SET ${fields.join(', ')} WHERE id = $${index} RETURNING *`;
+        const result = await pool.query(sql, values);
+        return result.rows[0];
+    }
+
+    static async delete(id) {
+        const sql = 'DELETE FROM sponsors WHERE id = $1 RETURNING id';
+        const result = await pool.query(sql, [id]);
+        return result.rows[0] || null;
+    }
+}
+
+module.exports = Sponsor;

@@ -1,57 +1,69 @@
-const mongoose = require('mongoose');
+const pool = require('../config/database');
 
-const roleSchema = new mongoose.Schema({
-    name: { type: String, unique: true, required: true },
-    description: { type: String },
-    icon: { type: String, default: 'person' },
-    color: { type: String, default: '#4C3C32' },
-    permissions: [String],
-    isSystemRole: { type: Boolean, default: false }
-}, { timestamps: true });
-
-// Static methods for compatibility with old controller calls
-roleSchema.statics.getByName = function(name) {
-    return this.findOne({ name });
-};
-
-roleSchema.statics.getAll = async function() {
-    const roles = await this.find().sort({ name: 1 });
-    const User = mongoose.model('User');
-
-    return Promise.all(roles.map(async (role) => {
-        const count = await User.countDocuments({ roleId: role._id });
-        return {
-            ...role.toObject(),
-            user_count: count,
-            userCount: count,
-            created_at: role.createdAt
-        };
-    }));
-};
-
-roleSchema.statics.update = function(id, data) {
-    return this.findByIdAndUpdate(id, data, { new: true });
-};
-
-roleSchema.statics.delete = function(id) {
-    return this.findByIdAndDelete(id);
-};
-
-roleSchema.statics.updatePermissions = function(id, permissions) {
-    if (!Array.isArray(permissions)) {
-        // If it's the old object format, we might need to convert it or just reject it
-        // For now, let's assume we are moving to the array of strings format
-        return this.findByIdAndUpdate(id, { permissions: [] }, { new: true });
+class Role {
+    static async getAll() {
+        const sql = `
+            SELECT r.*, COUNT(u.id)::int as user_count, COUNT(u.id)::int as "userCount"
+            FROM roles r
+            LEFT JOIN users u ON r.id = u.role_id
+            GROUP BY r.id
+            ORDER BY r.name ASC
+        `;
+        const result = await pool.query(sql);
+        return result.rows;
     }
-    return this.findByIdAndUpdate(id, { permissions }, { new: true });
-};
 
-// Virtuals for frontend compatibility
-roleSchema.virtual('id').get(function() {
-    return this._id.toHexString();
-});
+    static async findById(id) {
+        const result = await pool.query('SELECT * FROM roles WHERE id = $1', [id]);
+        return result.rows[0] || null;
+    }
 
-roleSchema.set('toJSON', { virtuals: true });
-roleSchema.set('toObject', { virtuals: true });
+    static async getByName(name) {
+        const result = await pool.query('SELECT * FROM roles WHERE name = $1', [name]);
+        return result.rows[0] || null;
+    }
 
-module.exports = mongoose.model('Role', roleSchema);
+    static async create({ name, description, icon, color, isSystemRole = false }) {
+        const sql = `
+            INSERT INTO roles (name, description, icon, color, is_system_role)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+        `;
+        const result = await pool.query(sql, [name, description, icon, color, isSystemRole]);
+        return result.rows[0];
+    }
+
+    static async update(id, data) {
+        const fields = [];
+        const values = [];
+        let index = 1;
+
+        for (const [key, value] of Object.entries(data)) {
+            const dbKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+            fields.push(`${dbKey} = $${index++}`);
+            values.push(value);
+        }
+
+        if (fields.length === 0) return this.findById(id);
+
+        values.push(id);
+        const sql = `UPDATE roles SET ${fields.join(', ')} WHERE id = $${index} RETURNING *`;
+        const result = await pool.query(sql, values);
+        return result.rows[0];
+    }
+
+    static async delete(id) {
+        const result = await pool.query('DELETE FROM roles WHERE id = $1 RETURNING id', [id]);
+        return result.rows[0];
+    }
+
+    static async updatePermissions(id, permissions) {
+        // Assume permissions is stored as a text or json column in PostgreSQL if needed
+        // For now, let's just update the permissions column if it exists in schema
+        const sql = "UPDATE roles SET permissions = $1 WHERE id = $2 RETURNING *";
+        const result = await pool.query(sql, [JSON.stringify(permissions), id]);
+        return result.rows[0];
+    }
+}
+
+module.exports = Role;
