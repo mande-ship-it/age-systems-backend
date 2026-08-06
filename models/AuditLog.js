@@ -1,26 +1,15 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class AuditLog {
-    static async create({ userId, action, details, actorName = 'System' }) {
-        const sql = `
-            INSERT INTO audit_logs (user_id, action, details, actor_name)
-            VALUES ($1, $2, $3, $4)
-            RETURNING *
-        `;
-        const result = await pool.query(sql, [userId || null, action, details, actorName]);
-        return result.rows[0];
-    }
+const auditLogSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    action: { type: String, required: true },
+    details: { type: String },
+    actorName: { type: String, default: 'System' },
+    created_at: { type: Date, default: Date.now }
+}, {
+    timestamps: { createdAt: 'created_at', updatedAt: false },
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
 
-    static async getAll() {
-        const sql = `
-            SELECT a.*, u.full_name as user_name
-            FROM audit_logs a
-            LEFT JOIN users u ON a.user_id = u.id
-            ORDER BY a.created_at DESC
-        `;
-        const result = await pool.query(sql);
-        return result.rows;
-    }
-}
-
-module.exports = AuditLog;
+module.exports = mongoose.model('AuditLog', auditLogSchema);

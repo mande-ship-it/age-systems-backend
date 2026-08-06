@@ -1,73 +1,22 @@
-const pool = require('../config/database');
+const mongoose = require('mongoose');
 
-class AttendanceSession {
-    static async create(data) {
-        const { type, schoolId, sessionDate, facilitator, location, district, month, weekNumber, year, term, semester } = data;
-        const sql = `
-            INSERT INTO attendance_sessions (type, school_id, session_date, facilitator, location, district, month, week_number, year, term, semester)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-            RETURNING *
-        `;
-        const values = [type, schoolId || null, sessionDate || new Date(), facilitator, location, district, month, weekNumber, year, term, semester];
-        const result = await pool.query(sql, values);
-        return result.rows[0];
-    }
+const attendanceSessionSchema = new mongoose.Schema({
+    type: { type: String, required: true }, // University CHATS, Secondary CHATS, etc.
+    schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School' },
+    sessionDate: { type: Date, default: Date.now },
+    facilitator: { type: String },
+    location: { type: String },
+    district: { type: String },
+    month: { type: Number },
+    weekNumber: { type: Number },
+    year: { type: Number },
+    term: { type: String },
+    semester: { type: String },
+    created_at: { type: Date, default: Date.now }
+}, {
+    timestamps: { createdAt: 'created_at', updatedAt: false },
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
 
-    static async getAll(filters = {}) {
-        let sql = `
-            SELECT asess.*, s.name as school_name
-            FROM attendance_sessions asess
-            LEFT JOIN schools s ON asess.school_id = s.id
-            WHERE 1=1
-        `;
-        const params = [];
-        let index = 1;
-
-        if (filters.type) {
-            sql += ` AND asess.type = $${index++}`;
-            params.push(filters.type);
-        }
-        if (filters.schoolId) {
-            sql += ` AND asess.school_id = $${index++}`;
-            params.push(filters.schoolId);
-        }
-        if (filters.district) {
-            sql += ` AND asess.district = $${index++}`;
-            params.push(filters.district);
-        }
-        if (filters.month) {
-            sql += ` AND asess.month = $${index++}`;
-            params.push(filters.month);
-        }
-        if (filters.weekNumber) {
-            sql += ` AND asess.week_number = $${index++}`;
-            params.push(filters.weekNumber);
-        }
-        if (filters.term) {
-            sql += ` AND asess.term = $${index++}`;
-            params.push(filters.term);
-        }
-        if (filters.semester) {
-            sql += ` AND asess.semester = $${index++}`;
-            params.push(filters.semester);
-        }
-
-        sql += ` ORDER BY asess.session_date DESC, asess.created_at DESC`;
-
-        const result = await pool.query(sql, params);
-        return result.rows;
-    }
-
-    static async findById(id) {
-        const sql = `
-            SELECT asess.*, s.name as school_name
-            FROM attendance_sessions asess
-            LEFT JOIN schools s ON asess.school_id = s.id
-            WHERE asess.id = $1
-        `;
-        const result = await pool.query(sql, [id]);
-        return result.rows[0] || null;
-    }
-}
-
-module.exports = AttendanceSession;
+module.exports = mongoose.model('AttendanceSession', attendanceSessionSchema);
