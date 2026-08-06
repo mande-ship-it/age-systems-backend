@@ -40,7 +40,7 @@ const path = require('path');
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "*",
+        origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000"],
         methods: ["GET", "POST", "PUT", "DELETE"],
         credentials: true
     },
@@ -64,7 +64,11 @@ io.on('connection', (socket) => {
     });
 });
 
-app.use(cors());
+app.use(cors({
+    origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" }
