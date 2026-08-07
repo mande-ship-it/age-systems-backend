@@ -9,17 +9,15 @@ const NotificationService = require('../utils/notificationService');
  */
 const getPendingActivities = async (req, res, next) => {
     try {
-        const pendingScholars = await Scholar.getAll(); // Filter by status locally for now or add method
-        const pendingEvents = await Event.getAll('Pending');
-        const pendingPayments = await Payment.getAll('Pending');
-
-        const scholars = pendingScholars.filter(s => s.status === 'Pending');
+        const scholars = await Scholar.find({ status: 'Pending' }).populate('schoolId sponsorId userId');
+        const events = await Event.find({ status: 'Pending' });
+        const payments = await Payment.find({ status: 'Pending' }).populate('scholarId');
 
         return successResponse(res, {
             scholars,
-            events: pendingEvents,
-            payments: pendingPayments,
-            totalCount: scholars.length + pendingEvents.length + pendingPayments.length
+            events,
+            payments,
+            totalCount: scholars.length + events.length + payments.length
         }, 'Pending activities retrieved successfully.');
     } catch (err) {
         next(err);
@@ -32,28 +30,28 @@ const getPendingActivities = async (req, res, next) => {
 const approveActivity = async (req, res, next) => {
     try {
         const { type, id } = req.params;
-        const userRole = req.user?.role || '';
+        const userRole = (req.user?.role || '').toLowerCase();
         let result;
 
         switch (type.toLowerCase()) {
             case 'scholar':
                 // Role check: Only Admin, Country Director, and Program Coordinator/Manager can approve scholars
-                if (!['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole)) {
+                if (!['administrator', 'admin', 'country director', 'program coordinator', 'program manager'].includes(userRole)) {
                     return errorResponse(res, 'You do not have permission to approve scholars.', 403);
                 }
-                result = await Scholar.approve(id);
+                result = await Scholar.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
                 if (result) {
-                    await NotificationService.notifyAll(`🎓 Scholar approved: ${result.full_name || 'New Scholar'}`, 'success', req.user?.fullName);
+                    await NotificationService.notifyAll(`🎓 Scholar approved: ${result.fullName || 'New Scholar'}`, 'success', req.user?.fullName);
                 }
                 break;
             case 'event':
-                result = await Event.approve(id);
+                result = await Event.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
                 if (result) {
                     await NotificationService.notifyAll(`✅ Event approved: ${result.title}`, 'success', req.user?.fullName);
                 }
                 break;
             case 'payment':
-                result = await Payment.approve(id);
+                result = await Payment.findByIdAndUpdate(id, { status: 'Completed' }, { new: true });
                 if (result) {
                     await NotificationService.notifyAll(`💰 Payment disbursement approved: MWK ${result.amount}`, 'success', req.user?.fullName);
                 }
@@ -76,30 +74,28 @@ const approveActivity = async (req, res, next) => {
 const rejectActivity = async (req, res, next) => {
     try {
         const { type, id } = req.params;
-        const userRole = req.user?.role || '';
+        const userRole = (req.user?.role || '').toLowerCase();
         let result;
 
         switch (type.toLowerCase()) {
             case 'scholar':
-                // Role check: Only Admin, Country Director, and Program Coordinator/Manager can reject scholars
-                if (!['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole)) {
+                // Role check
+                if (!['administrator', 'admin', 'country director', 'program coordinator', 'program manager'].includes(userRole)) {
                     return errorResponse(res, 'You do not have permission to reject scholars.', 403);
                 }
-                const scholar = await Scholar.findById(id);
-                result = await Scholar.delete(id);
-                if (result && scholar) {
-                    await NotificationService.notifyAll(`❌ Scholar registration rejected: ${scholar.full_name || 'Scholar'}`, 'warning', req.user?.fullName || 'System');
+                result = await Scholar.findByIdAndDelete(id);
+                if (result) {
+                    await NotificationService.notifyAll(`❌ Scholar registration rejected: ${result.fullName || 'Scholar'}`, 'warning', req.user?.fullName || 'System');
                 }
                 break;
             case 'event':
-                const event = await Event.findById(id);
-                result = await Event.delete(id);
-                if (result && event) {
-                    await NotificationService.notifyAll(`❌ Event creation rejected: "${event.title}"`, 'warning', req.user?.fullName || 'System');
+                result = await Event.findByIdAndDelete(id);
+                if (result) {
+                    await NotificationService.notifyAll(`❌ Event creation rejected: "${result.title}"`, 'warning', req.user?.fullName || 'System');
                 }
                 break;
             case 'payment':
-                result = await Payment.reject(id);
+                result = await Payment.findByIdAndUpdate(id, { status: 'Failed' }, { new: true });
                 if (result) {
                     await NotificationService.notifyAll(`❌ Payment disbursement rejected: MWK ${result.amount}`, 'warning', req.user?.fullName || 'System');
                 }

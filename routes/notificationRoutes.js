@@ -18,8 +18,8 @@ router.get('/', auth, async (req, res, next) => {
 
 router.get('/recent', auth, async (req, res, next) => {
     try {
-        const logs = await AuditLog.find().sort({ createdAt: -1 }).limit(10);
-        return successResponse(res, logs);
+        const notifications = await Notification.find().sort({ createdAt: -1 }).limit(10);
+        return successResponse(res, notifications);
     } catch (err) {
         next(err);
     }

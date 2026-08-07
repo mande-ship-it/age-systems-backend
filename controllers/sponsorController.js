@@ -39,7 +39,7 @@ const createSponsor = async (req, res, next) => {
 
         await sponsor.save();
 
-        await NotificationService.notifyAll(`🤝 New Strategic Partner onboarded: ${sponsor.name}`, 'success');
+        await NotificationService.notifyAll(`🤝 New Strategic Partner onboarded: ${sponsor.name}`, 'success', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, sponsor, 'Partner profile established successfully.', 201);
     } catch (err) {
@@ -100,7 +100,7 @@ const updateSponsor = async (req, res, next) => {
         const updated = await Sponsor.findByIdAndUpdate(id, sponsorData, { new: true });
         if (!updated) return errorResponse(res, 'Partner profile not found.', 404);
 
-        await NotificationService.notifyAll(`📝 Partner Profile Updated: ${updated.name}`, 'info');
+        await NotificationService.notifyAll(`📝 Partner Profile Updated: ${updated.name}`, 'info', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated, 'Partner profile updated successfully.');
     } catch (err) {
         if (err.name === 'ValidationError') {
@@ -122,7 +122,7 @@ const approveSponsor = async (req, res, next) => {
             await User.findByIdAndUpdate(updated.userId, { isActive: true });
         }
 
-        await NotificationService.notifyAll(`✅ Sponsor approved: ${updated.name}`, 'success');
+        await NotificationService.notifyAll(`✅ Sponsor approved: ${updated.name}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated, 'Sponsor approved successfully.');
     } catch (err) {
         next(err);
@@ -137,7 +137,7 @@ const deleteSponsor = async (req, res, next) => {
         const sponsor = await Sponsor.findByIdAndDelete(id);
         if (!sponsor) return errorResponse(res, 'Sponsor not found.', 404);
 
-        await NotificationService.notifyAll(`🗑️ Sponsor removed: ${sponsor.name}`, 'warning');
+        await NotificationService.notifyAll(`🗑️ Sponsor removed: ${sponsor.name}`, 'warning', req.user ? req.user.fullName : 'System');
         return successResponse(res, { id }, 'Sponsor deleted successfully.');
     } catch (err) {
         next(err);

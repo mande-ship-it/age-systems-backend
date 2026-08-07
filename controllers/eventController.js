@@ -5,7 +5,8 @@ const NotificationService = require('../utils/notificationService');
 const getAllEvents = async (req, res, next) => {
     try {
         const { status } = req.query;
-        const events = await Event.getAll(status);
+        const filter = status ? { status } : {};
+        const events = await Event.find(filter).sort({ eventDate: 1, eventTime: 1 });
         return successResponse(res, events);
     } catch (err) {
         next(err);
@@ -14,20 +15,16 @@ const getAllEvents = async (req, res, next) => {
 
 const createEvent = async (req, res, next) => {
     try {
-        const { title, description, category, eventDate, eventTime, location, organizer, targetedParticipants } = req.body;
+        const eventData = { ...req.body };
 
-        const event = await Event.create({
-            title,
-            description,
-            category,
-            eventDate,
-            eventTime,
-            location,
-            organizer,
-            targetedParticipants
-        });
+        // Map frontend fields to model fields if necessary
+        if (req.body.date && !eventData.eventDate) eventData.eventDate = req.body.date;
+        if (req.body.time && !eventData.eventTime) eventData.eventTime = req.body.time;
 
-        await NotificationService.notifyAll(`📅 New Event: "${event.title}" created and awaiting approval.`, 'info');
+        const event = new Event(eventData);
+        await event.save();
+
+        await NotificationService.notifyAll(`📅 New Event: "${event.title}" created and awaiting approval.`, 'info', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, event, 'Event created and awaiting approval.', 201);
     } catch (err) {
@@ -37,10 +34,10 @@ const createEvent = async (req, res, next) => {
 
 const approveEvent = async (req, res, next) => {
     try {
-        const updated = await Event.approve(req.params.id);
+        const updated = await Event.findByIdAndUpdate(req.params.id, { status: 'Active' }, { new: true });
         if (!updated) return errorResponse(res, 'Event not found or already approved.', 404);
 
-        await NotificationService.notifyAll(`✅ Event approved: "${updated.title}"`, 'success');
+        await NotificationService.notifyAll(`✅ Event approved: "${updated.title}"`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated, 'Event approved successfully.');
     } catch (err) {
         next(err);
@@ -49,10 +46,14 @@ const approveEvent = async (req, res, next) => {
 
 const updateEvent = async (req, res, next) => {
     try {
-        const updated = await Event.update(req.params.id, req.body);
+        const eventData = { ...req.body };
+        if (req.body.date && !eventData.eventDate) eventData.eventDate = req.body.date;
+        if (req.body.time && !eventData.eventTime) eventData.eventTime = req.body.time;
+
+        const updated = await Event.findByIdAndUpdate(req.params.id, eventData, { new: true });
         if (!updated) return errorResponse(res, 'Event not found.', 404);
 
-        await NotificationService.notifyAll(`📝 Event updated: "${updated.title}"`, 'info');
+        await NotificationService.notifyAll(`📝 Event updated: "${updated.title}"`, 'info', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated, 'Event updated successfully.');
     } catch (err) {
         next(err);
@@ -61,10 +62,10 @@ const updateEvent = async (req, res, next) => {
 
 const deleteEvent = async (req, res, next) => {
     try {
-        const deleted = await Event.delete(req.params.id);
+        const deleted = await Event.findByIdAndDelete(req.params.id);
         if (!deleted) return errorResponse(res, 'Event not found.', 404);
 
-        await NotificationService.notifyAll(`🗑️ An event was deleted.`, 'warning');
+        await NotificationService.notifyAll(`🗑️ An event was deleted.`, 'warning', req.user ? req.user.fullName : 'System');
         return successResponse(res, { id: req.params.id }, 'Event deleted successfully.');
     } catch (err) {
         next(err);

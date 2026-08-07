@@ -8,7 +8,7 @@ const eventSchema = new mongoose.Schema({
     eventTime: { type: String }, // E.g., "10:00 AM"
     location: { type: String },
     organizer: { type: String },
-    targetedParticipants: { type: String },
+    targetedParticipants: [{ type: String }],
     status: { type: String, default: 'Pending' }, // Pending, Active, History
     completed_at: { type: Date },
     created_at: { type: Date, default: Date.now },

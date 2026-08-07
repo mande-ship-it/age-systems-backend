@@ -92,7 +92,7 @@ const createUser = async (req, res, next) => {
             console.error('Failed to send OTP email:', e.message);
         }
 
-        await NotificationService.notifyAll(`👤 New User: ${fullName}`, 'success');
+        await NotificationService.notifyAll(`👤 New User: ${fullName}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, { user, temp_password: tempPassword }, 'User created successfully.', 201);
     } catch (err) {
         console.error('createUser error:', err);
@@ -132,6 +132,8 @@ const updateUser = async (req, res, next) => {
 
         if (!updated) return errorResponse(res, 'User not found.', 404);
 
+        await NotificationService.notifyAll(`📝 User updated: ${updated.fullName}`, 'info', req.user ? req.user.fullName : 'System');
+
         return successResponse(res, updated, 'User profile updated successfully.');
     } catch (err) {
         console.error('updateUser error:', err);
@@ -141,7 +143,13 @@ const updateUser = async (req, res, next) => {
 
 const deleteUser = async (req, res, next) => {
     try {
+        const user = await User.findById(req.params.id);
         await User.findByIdAndDelete(req.params.id);
+
+        if (user) {
+            await NotificationService.notifyAll(`🗑️ User deleted: ${user.fullName}`, 'warning', req.user ? req.user.fullName : 'System');
+        }
+
         return successResponse(res, null, 'User deleted.');
     } catch (err) {
         next(err);

@@ -26,7 +26,7 @@ const createSchool = async (req, res, next) => {
             const existingSchool = await School.findOne({ code });
             if (existingSchool) {
                 const updated = await School.findByIdAndUpdate(existingSchool._id, schoolData, { new: true });
-                await NotificationService.notifyAll(`🏫 School updated: ${name || code}`, 'info');
+                await NotificationService.notifyAll(`🏫 School updated: ${name || code}`, 'info', req.user ? req.user.fullName : 'System');
                 return successResponse(res, updated, 'School updated (already existed).', 201);
             }
         }
@@ -34,7 +34,7 @@ const createSchool = async (req, res, next) => {
         const school = new School(schoolData);
         await school.save();
 
-        await NotificationService.notifyAll(`🏫 New school registered: ${name || code}`, 'success');
+        await NotificationService.notifyAll(`🏫 New school registered: ${name || code}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, school, 'School created successfully.', 201);
     } catch (err) {
         next(err);
@@ -82,7 +82,7 @@ const updateSchool = async (req, res, next) => {
 
         if (!updated) return errorResponse(res, 'School not found.', 404);
 
-        await NotificationService.notifyAll(`🏫 School updated: ${updated.name || updated.code}`, 'info');
+        await NotificationService.notifyAll(`🏫 School updated: ${updated.name || updated.code}`, 'info', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated, 'School updated successfully.');
     } catch (err) {
         next(err);
@@ -95,7 +95,7 @@ const deleteSchool = async (req, res, next) => {
         const school = await School.findByIdAndDelete(id);
         if (!school) return errorResponse(res, 'School not found.', 404);
 
-        await NotificationService.notifyAll(`🗑️ School deleted: ${school.name || school.code}`, 'warning');
+        await NotificationService.notifyAll(`🗑️ School deleted: ${school.name || school.code}`, 'warning', req.user ? req.user.fullName : 'System');
         return successResponse(res, { id }, 'School deleted successfully.');
     } catch (err) {
         next(err);
@@ -181,7 +181,7 @@ const promoteScholar = async (req, res, next) => {
         scholar.academicYear = nextClass;
         await scholar.save();
 
-        await NotificationService.notifyAll(`📈 Scholar promoted: ${scholar.fullName} moved to ${nextClass}`, 'success');
+        await NotificationService.notifyAll(`📈 Scholar promoted: ${scholar.fullName} moved to ${nextClass}`, 'success', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, {
             scholar_id: id,

@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const AttendanceSession = require('../models/AttendanceSession');
 const Attendance = require('../models/Attendance');
+const School = require('../models/School');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 const { applyDistrictFilter } = require('../utils/districtFilter');
@@ -15,14 +16,8 @@ const recordSession = async (req, res, next) => {
         const userRole = (req.user?.role || '').toLowerCase();
         const isFieldOfficer = userRole.includes('field');
 
-        // Permission check: Only Field Officers can mark attendance
-        if (!isFieldOfficer) {
-            return errorResponse(res, 'Access denied. Only Field Officers are permitted to mark attendance.', 403);
-        }
-
         // Resolve district from the school
         if (sessionData.schoolId) {
-            const School = require('../models/School');
             const school = await School.findById(sessionData.schoolId);
             if (school) {
                 // Security check for field officers
@@ -51,7 +46,7 @@ const recordSession = async (req, res, next) => {
             await Attendance.insertMany(attendanceEntries);
         }
 
-        await NotificationService.notifyAll(`📋 Attendance recorded at ${req.body.schoolName || 'Institution'}`, 'info');
+        await NotificationService.notifyAll(`📋 Attendance recorded at ${req.body.schoolName || 'Institution'}`, 'info', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, session, 'Attendance register saved successfully.', 201);
     } catch (err) {
@@ -62,7 +57,13 @@ const recordSession = async (req, res, next) => {
 const getHistory = async (req, res, next) => {
     try {
         const filters = applyDistrictFilter(req, req.query);
-        const history = await AttendanceSession.getAll(filters);
+
+        // Convert string values to numbers for MongoDB if applicable
+        if (filters.month) filters.month = parseInt(filters.month);
+        if (filters.weekNumber) filters.weekNumber = parseInt(filters.weekNumber);
+        if (filters.year) filters.year = parseInt(filters.year);
+
+        const history = await AttendanceSession.find(filters).populate('schoolId').sort({ sessionDate: -1, created_at: -1 });
 
         // Add present/total counts for each session
         const enrichedHistory = await Promise.all(history.map(async (s) => {
@@ -77,6 +78,7 @@ const getHistory = async (req, res, next) => {
 
             return {
                 ...s.toObject(),
+                school_name: s.schoolId ? s.schoolId.name : 'N/A',
                 present_count: counts.length > 0 ? counts[0].present : 0,
                 total_count: counts.length > 0 ? counts[0].total : 0
             };
@@ -102,6 +104,7 @@ const getSessionById = async (req, res, next) => {
 
         return successResponse(res, {
             ...session.toObject(),
+            school_name: session.schoolId ? session.schoolId.name : 'N/A',
             entries
         });
     } catch (err) {
@@ -137,7 +140,7 @@ const getAttendanceAnalytics = async (req, res, next) => {
         return successResponse(res, {
             stats: stats.reduce((acc, curr) => { acc[curr._id] = curr.count; return acc; }, { total: stats.reduce((s, c) => s + c.count, 0) }),
             trends: trends.map(t => ({ week_start: t._id, attendance_rate: t.rate })),
-            summary: [], // Simplified for now
+            summary: [],
             alerts: []
         });
     } catch (err) {
@@ -146,7 +149,6 @@ const getAttendanceAnalytics = async (req, res, next) => {
 };
 
 const getSchoolAttendanceReport = async (req, res, next) => {
-    // Simplified version of the complex SQL report
     try {
         const { schoolId } = req.params;
         const report = await Attendance.aggregate([

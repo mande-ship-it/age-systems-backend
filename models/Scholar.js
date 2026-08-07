@@ -52,8 +52,19 @@ scholarSchema.virtual('yearsRemaining').get(function() {
     return remaining > 0 ? remaining : 0;
 });
 
+// Virtual for current relative year
+scholarSchema.virtual('currentRelativeYear').get(function() {
+    return this.yearsCompleted + 1;
+});
+
+// Virtual for status display (including flags)
+scholarSchema.virtual('displayStatus').get(function() {
+    if (this.flag) return `${this.status} (${this.flag})`;
+    return this.status;
+});
+
 // Auto-generate scholarId
-scholarSchema.pre('save', async function(next) {
+scholarSchema.pre('save', async function() {
     if (this.isNew && !this.scholarId) {
         // Find the last scholar registered
         const lastScholar = await this.constructor.findOne({ scholarId: /^AGE-/ }).sort({ created_at: -1 });
@@ -71,8 +82,6 @@ scholarSchema.pre('save', async function(next) {
     } else if (this.academicYear && !this.currentClass) {
         this.currentClass = this.academicYear;
     }
-
-    next();
 });
 
 // Statics

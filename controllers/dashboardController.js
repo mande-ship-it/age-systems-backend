@@ -32,7 +32,9 @@ const getDashboardStats = async (req, res, next) => {
 
         // 2. Retention Analytics
         const retentionFilter = { ...baseFilter, schoolType: level };
-        if (schoolId) retentionFilter.schoolId = mongoose.Types.ObjectId(schoolId);
+        if (schoolId && mongoose.Types.ObjectId.isValid(schoolId)) {
+            retentionFilter.schoolId = new mongoose.Types.ObjectId(schoolId);
+        }
 
         const retentionStats = await Scholar.aggregate([
             { $match: retentionFilter },
@@ -58,7 +60,9 @@ const getDashboardStats = async (req, res, next) => {
 
         // 4. Institutional Performance Trends
         const trendsMatch = { ...baseFilter, schoolType: level, status: 'Active' };
-        if (schoolId) trendsMatch.schoolId = mongoose.Types.ObjectId(schoolId);
+        if (schoolId && mongoose.Types.ObjectId.isValid(schoolId)) {
+            trendsMatch.schoolId = new mongoose.Types.ObjectId(schoolId);
+        }
 
         const performanceTrends = await AcademicResult.aggregate([
             { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },

@@ -71,7 +71,7 @@ const recordResults = async (req, res, next) => {
         // Trigger progression evaluation (Spec Section 3)
         await evaluateProgression(scholarId, year);
 
-        await NotificationService.notifyAll(`🎓 Academic results entered for ${scholar.fullName} (${year})`, 'success');
+        await NotificationService.notifyAll(`🎓 Academic results entered for ${scholar.fullName} (${year})`, 'success', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, savedResults, `Successfully saved ${savedResults.length} result(s).`, 201);
     } catch (err) {

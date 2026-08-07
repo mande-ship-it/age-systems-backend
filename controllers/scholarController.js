@@ -111,13 +111,24 @@ const createScholar = async (req, res, next) => {
             scholarData.currentClass = scholarData.academicYear;
         }
 
+        // Progression Baseline (Spec Section 1)
+        if (!scholarData.registeredClass) {
+            scholarData.registeredClass = scholarData.academicYear;
+        }
+        if (!scholarData.programStartYearLabel) {
+            scholarData.programStartYearLabel = scholarData.registeredClass;
+        }
+        if (scholarData.yearsCompleted === undefined) {
+            scholarData.yearsCompleted = 0;
+        }
+
         const scholar = new Scholar(scholarData);
         await scholar.save();
 
         // Return fully populated scholar for immediate frontend display
         const populatedScholar = await Scholar.getById(scholar._id);
 
-        await NotificationService.notifyAll(`🎓 New Scholar registered: ${populatedScholar.fullName}`, 'success');
+        await NotificationService.notifyAll(`🎓 New Scholar registered: ${populatedScholar.fullName}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, populatedScholar, 'Scholar registered successfully.', 201);
     } catch (err) {
         next(err);
@@ -143,7 +154,7 @@ const updateScholar = async (req, res, next) => {
         
         if (!updatedScholar) return errorResponse(res, 'Scholar not found.', 404);
 
-        await NotificationService.notifyAll(`📝 Scholar profile updated: ${updatedScholar.fullName}`, 'info');
+        await NotificationService.notifyAll(`📝 Scholar profile updated: ${updatedScholar.fullName}`, 'info', req.user ? req.user.fullName : 'System');
         return successResponse(res, updatedScholar);
     } catch (err) {
         next(err);
@@ -161,7 +172,7 @@ const approveScholar = async (req, res, next) => {
         const updated = await Scholar.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
         if (!updated) return errorResponse(res, 'Scholar not found.', 404);
 
-        await NotificationService.notifyAll(`✅ Scholar approved: ${updated.fullName}`, 'success');
+        await NotificationService.notifyAll(`✅ Scholar approved: ${updated.fullName}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, updated);
     } catch (err) {
         next(err);
@@ -179,7 +190,7 @@ const deleteScholar = async (req, res, next) => {
         const scholar = await Scholar.findByIdAndDelete(id);
         if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
-        await NotificationService.notifyAll(`🗑️ Scholar removed: ${scholar.fullName}`, 'warning');
+        await NotificationService.notifyAll(`🗑️ Scholar removed: ${scholar.fullName}`, 'warning', req.user ? req.user.fullName : 'System');
         return successResponse(res, { id });
     } catch (err) {
         next(err);
@@ -208,7 +219,7 @@ const getUniversityGraduates = async (req, res, next) => {
     try {
         const graduates = await Scholar.find({
             schoolType: 'University',
-            status: 'Graduated'
+            status: { $in: ['Graduated', 'Awaiting Allocation'] }
         }).sort({ endYear: -1, fullName: 1 });
         return successResponse(res, graduates);
     } catch (err) {

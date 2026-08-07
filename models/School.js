@@ -29,12 +29,11 @@ const schoolSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-schoolSchema.pre('save', async function(next) {
+schoolSchema.pre('save', async function() {
     if (this.isNew && !this.code) {
         const count = await this.constructor.countDocuments();
         this.code = `SCH-${(count + 1).toString().padStart(3, '0')}`;
     }
-    next();
 });
 
 module.exports = mongoose.model('School', schoolSchema);

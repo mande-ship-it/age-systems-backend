@@ -36,7 +36,7 @@ const allocateInternship = async (req, res, next) => {
             });
         } catch (e) {}
 
-        await NotificationService.notifyAll(`💼 Internship Allocated: ${scholar.fullName}`, 'success');
+        await NotificationService.notifyAll(`💼 Internship Allocated: ${scholar.fullName}`, 'success', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, internship, 'Internship allocated.', 201);
     } catch (err) {
