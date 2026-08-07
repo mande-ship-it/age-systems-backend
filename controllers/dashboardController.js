@@ -104,7 +104,6 @@ const getDashboardStats = async (req, res, next) => {
 
         const pScholarsCount = await Scholar.countDocuments({ ...baseFilter, status: 'Pending' });
         const pEventsCount = await Event.countDocuments({ status: 'Pending' });
-        const pPaymentsCount = await Payment.countDocuments({ status: 'Pending' });
 
         const riskStats = await Scholar.aggregate([
             { $match: { ...baseFilter, schoolType: level, status: 'Active' } },
@@ -218,7 +217,7 @@ const getDashboardStats = async (req, res, next) => {
             performanceSeries,
             engagementSeries,
             regions,
-            pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount + pPaymentsCount,
+            pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
             approvals: approvalsSummary,
             schools: schoolsRisks
