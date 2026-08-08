@@ -8,10 +8,10 @@ const auth = require('../middleware/authMiddleware');
 const authorize = require('../middleware/roleMiddleware');
 
 // All event routes
-router.get('/', eventController.getAllEvents);
-router.post('/', eventRules, validate, eventController.createEvent);
-router.patch('/:id/approve', auth, authorize('Admin'), eventController.approveEvent);
-router.put('/:id', eventRules, validate, eventController.updateEvent);
-router.delete('/:id', auth, authorize('Admin'), eventController.deleteEvent);
+router.get('/', auth, eventController.getAllEvents);
+router.post('/', auth, eventRules, validate, eventController.createEvent);
+router.patch('/:id/approve', auth, authorize('Administrator'), eventController.approveEvent);
+router.put('/:id', auth, eventRules, validate, eventController.updateEvent);
+router.delete('/:id', auth, authorize('Administrator'), eventController.deleteEvent);
 
 module.exports = router;
