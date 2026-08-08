@@ -43,7 +43,7 @@ router.patch('/:id/approve', auth, authorize(['Admin', 'Country Director']), app
 
 router.delete('/:id',
     auth,
-    authorize(['Admin']),
+    authorize(['Administrator']),
     deleteSponsor
 );
 

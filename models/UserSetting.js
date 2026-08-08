@@ -7,6 +7,18 @@ const userSettingSchema = new mongoose.Schema({
     biometricEnabled: { type: Boolean, default: false },
     language: { type: String, default: 'English (Malawi)' },
     currency: { type: String, default: 'Malawian Kwacha (MWK)' }
-}, { timestamps: true });
+}, {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true }
+});
+
+userSettingSchema.virtual('notifications_enabled').get(function() {
+    return this.notificationsEnabled;
+});
+
+userSettingSchema.virtual('biometric_enabled').get(function() {
+    return this.biometricEnabled;
+});
 
 module.exports = mongoose.model('UserSetting', userSettingSchema);

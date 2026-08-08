@@ -65,15 +65,42 @@ scholarSchema.virtual('displayStatus').get(function() {
 
 // Auto-generate scholarId
 scholarSchema.pre('save', async function() {
+    // Standardize input
+    if (this.fullName) this.fullName = this.fullName.trim();
+    if (this.scholarId) this.scholarId = this.scholarId.trim();
+
     if (this.isNew && !this.scholarId) {
-        // Find the last scholar registered
-        const lastScholar = await this.constructor.findOne({ scholarId: /^AGE-/ }).sort({ created_at: -1 });
-        let nextNumber = 1;
-        if (lastScholar && lastScholar.scholarId) {
-            const match = lastScholar.scholarId.match(/AGE-(\d+)/);
-            if (match) nextNumber = parseInt(match[1]) + 1;
+        console.log('[DEBUG] Generating unique scholarId...');
+
+        // Find all AGE- IDs and extract numbers to find true maximum
+        // This is more robust than sort({ scholarId: -1 }) on strings
+        const allScholars = await this.constructor.find({
+            scholarId: /^AGE-\d+/
+        }, 'scholarId');
+
+        let maxNum = 0;
+        allScholars.forEach(s => {
+            const match = s.scholarId.match(/AGE-(\d+)/);
+            if (match) {
+                const num = parseInt(match[1]);
+                if (num > maxNum) maxNum = num;
+            }
+        });
+
+        let nextNumber = maxNum + 1;
+        let uniqueId = `AGE-${nextNumber.toString().padStart(3, '0')}`;
+
+        // Safety loop for potential gaps or race conditions
+        let exists = await this.constructor.findOne({ scholarId: uniqueId });
+        while (exists) {
+            console.log(`[DEBUG] Collision detected for ${uniqueId}, incrementing...`);
+            nextNumber++;
+            uniqueId = `AGE-${nextNumber.toString().padStart(3, '0')}`;
+            exists = await this.constructor.findOne({ scholarId: uniqueId });
         }
-        this.scholarId = `AGE-${nextNumber.toString().padStart(3, '0')}`;
+
+        console.log(`[DEBUG] Assigned ID: ${uniqueId}`);
+        this.scholarId = uniqueId;
     }
 
     // Sync currentClass and academicYear
@@ -87,6 +114,22 @@ scholarSchema.pre('save', async function() {
 // Statics
 scholarSchema.statics.getById = function(id) {
     return this.findById(id).populate('schoolId sponsorId userId');
+};
+
+scholarSchema.statics.autoTransitionGraduates = async function() {
+    // Find active scholars where yearsCompleted >= programDurationYears
+    const dueForGraduation = await this.find({
+        status: 'Active',
+        $expr: { $gte: ["$yearsCompleted", "$programDurationYears"] }
+    });
+
+    if (dueForGraduation.length > 0) {
+        await this.updateMany(
+            { _id: { $in: dueForGraduation.map(s => s._id) } },
+            { status: 'Graduated' }
+        );
+    }
+    return dueForGraduation;
 };
 
 module.exports = mongoose.model('Scholar', scholarSchema);

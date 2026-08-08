@@ -12,12 +12,14 @@ const initSchedulers = () => {
     cron.schedule('0 8 * * *', async () => {
         console.log('⏰ Running daily event reminder check...');
         try {
-            const upcomingEvents = await Event.getEventsInDays(2);
+            const EventModel = require('../models/Event');
+            const UserModel = require('../models/User');
+            const upcomingEvents = await EventModel.getEventsInDays(2);
 
             if (upcomingEvents.length === 0) {
                 console.log('ℹ️ No events found for reminder (2 days remaining).');
             } else {
-                const users = await User.getAll();
+                const users = await UserModel.getAll();
 
                 for (const event of upcomingEvents) {
                     console.log(`🔔 Sending reminders for event: "${event.title}"`);
@@ -40,8 +42,8 @@ const initSchedulers = () => {
 
             // Also run history cleanup daily
             console.log('🧹 Cleaning up old event history (>2 days)...');
-            const deleted = await Event.cleanupHistory();
-            if (deleted.length > 0) {
+            const deleted = await EventModel.cleanupHistory();
+            if (deleted && deleted.length > 0) {
                 console.log(`🗑️ Deleted ${deleted.length} expired history events.`);
             }
         } catch (err) {
@@ -54,8 +56,9 @@ const initSchedulers = () => {
     cron.schedule('*/30 * * * *', async () => {
         console.log('🔄 Checking for events to move to history...');
         try {
-            const moved = await Event.autoMoveToHistory();
-            if (moved.length > 0) {
+            const EventModel = require('../models/Event');
+            const moved = await EventModel.autoMoveToHistory();
+            if (moved && moved.length > 0) {
                 console.log(`📜 Moved ${moved.length} events to history.`);
                 moved.forEach(e => console.log(`   - ${e.title}`));
             }

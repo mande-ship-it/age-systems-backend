@@ -11,7 +11,17 @@ const NotificationService = require('../utils/notificationService');
 const getAllUsers = async (req, res, next) => {
     try {
         const users = await User.find().populate('roleId departmentId').sort({ createdAt: -1 });
-        return successResponse(res, users);
+
+        const mappedUsers = users.map(u => {
+            const userObj = u.toObject();
+            if (userObj.profilePicture && userObj.profilePicture.includes('uploads/')) {
+                const parts = userObj.profilePicture.split('uploads/');
+                userObj.profilePicture = 'uploads/' + parts[parts.length - 1];
+            }
+            return userObj;
+        });
+
+        return successResponse(res, mappedUsers);
     } catch (err) {
         next(err);
     }

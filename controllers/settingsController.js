@@ -11,7 +11,15 @@ const getAccountProfile = async (req, res, next) => {
     try {
         const user = await User.findById(req.user.id).populate('roleId departmentId');
         if (!user) return errorResponse(res, 'User not found.', 404);
-        return successResponse(res, user);
+
+        const userObj = user.toObject();
+        // Normalize profile picture path if it's absolute
+        if (userObj.profilePicture && userObj.profilePicture.includes('uploads/')) {
+            const parts = userObj.profilePicture.split('uploads/');
+            userObj.profilePicture = 'uploads/' + parts[parts.length - 1];
+        }
+
+        return successResponse(res, userObj);
     } catch (err) {
         next(err);
     }
@@ -72,7 +80,24 @@ const getUserSettings = async (req, res, next) => {
 
 const updateUserSettings = async (req, res, next) => {
     try {
-        const updated = await UserSetting.findOneAndUpdate({ userId: req.user.id }, req.body, { new: true, upsert: true });
+        const mapping = {
+            'notifications_enabled': 'notificationsEnabled',
+            'biometric_enabled': 'biometricEnabled',
+            'theme': 'theme',
+            'language': 'language',
+            'currency': 'currency'
+        };
+
+        const updateData = {};
+        for (const key in req.body) {
+            if (mapping[key]) {
+                updateData[mapping[key]] = req.body[key];
+            } else {
+                updateData[key] = req.body[key];
+            }
+        }
+
+        const updated = await UserSetting.findOneAndUpdate({ userId: req.user.id }, updateData, { new: true, upsert: true });
         return successResponse(res, updated);
     } catch (err) {
         next(err);
@@ -103,16 +128,11 @@ const uploadProfilePicture = async (req, res, next) => {
     try {
         if (!req.file) return errorResponse(res, 'No file uploaded.', 400);
 
-        // Normalize path for web: replace backslashes and remove leading ./ or /
-        let normalizedPath = req.file.path.replace(/\\/g, '/');
-        if (normalizedPath.startsWith('./')) {
-            normalizedPath = normalizedPath.substring(2);
-        }
-        if (normalizedPath.startsWith('/')) {
-            normalizedPath = normalizedPath.substring(1);
-        }
+        // Save relative path: uploads/profiles/filename.jpg
+        const filename = req.file.filename;
+        const relativePath = `uploads/profiles/${filename}`;
 
-        const user = await User.findByIdAndUpdate(req.user.id, { profilePicture: normalizedPath }, { new: true });
+        const user = await User.findByIdAndUpdate(req.user.id, { profilePicture: relativePath }, { new: true });
         return successResponse(res, user, 'Profile picture updated.');
     } catch (err) {
         next(err);
@@ -148,7 +168,22 @@ const changePassword = async (req, res, next) => {
 
 const updateBackupSettings = async (req, res, next) => {
     try {
-        const updated = await BackupSetting.findOneAndUpdate({}, req.body, { new: true, upsert: true });
+        const mapping = {
+            'auto_backup_enabled': 'autoBackupEnabled',
+            'frequency': 'frequency',
+            'wifi_only': 'wifiOnly',
+        };
+
+        const updateData = {};
+        for (const key in req.body) {
+            if (mapping[key]) {
+                updateData[mapping[key]] = req.body[key];
+            } else {
+                updateData[key] = req.body[key];
+            }
+        }
+
+        const updated = await BackupSetting.findOneAndUpdate({}, updateData, { new: true, upsert: true });
         return successResponse(res, updated);
     } catch (err) {
         next(err);

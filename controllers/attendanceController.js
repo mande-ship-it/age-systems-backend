@@ -13,6 +13,12 @@ const recordSession = async (req, res, next) => {
     try {
         const { entries, ...sessionData } = req.body;
 
+        // Map snake_case to camelCase
+        if (sessionData.week_number) {
+            sessionData.weekNumber = sessionData.week_number;
+            delete sessionData.week_number;
+        }
+
         const userRole = (req.user?.role || '').toLowerCase();
         const isFieldOfficer = userRole.includes('field');
 
@@ -57,6 +63,12 @@ const recordSession = async (req, res, next) => {
 const getHistory = async (req, res, next) => {
     try {
         const filters = applyDistrictFilter(req, req.query);
+
+        // Map snake_case to camelCase for DB query
+        if (filters.week_number) {
+            filters.weekNumber = filters.week_number;
+            delete filters.week_number;
+        }
 
         // Convert string values to numbers for MongoDB if applicable
         if (filters.month) filters.month = parseInt(filters.month);

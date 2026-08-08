@@ -19,4 +19,51 @@ const eventSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
+// Statics
+eventSchema.statics.getEventsInDays = function(days) {
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + days);
+    targetDate.setHours(0, 0, 0, 0);
+
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    return this.find({
+        status: 'Active',
+        eventDate: { $gte: targetDate, $lt: nextDay }
+    });
+};
+
+eventSchema.statics.autoMoveToHistory = async function() {
+    const now = new Date();
+    // Find active events where eventDate has passed
+    const expired = await this.find({
+        status: 'Active',
+        eventDate: { $lt: now }
+    });
+
+    if (expired.length > 0) {
+        await this.updateMany(
+            { _id: { $in: expired.map(e => e._id) } },
+            { status: 'History' }
+        );
+    }
+    return expired;
+};
+
+eventSchema.statics.cleanupHistory = async function() {
+    const threshold = new Date();
+    threshold.setDate(threshold.getDate() - 2); // Older than 2 days
+
+    const oldEvents = await this.find({
+        status: 'History',
+        eventDate: { $lt: threshold }
+    });
+
+    if (oldEvents.length > 0) {
+        await this.deleteMany({ _id: { $in: oldEvents.map(e => e._id) } });
+    }
+    return oldEvents;
+};
+
 module.exports = mongoose.model('Event', eventSchema);

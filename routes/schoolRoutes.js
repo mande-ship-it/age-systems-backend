@@ -23,7 +23,7 @@ router.get('/:id', auth, getSchoolById);
 router.post('/', auth, authorize(['Admin', 'Country Director']), schoolRules, validate, createSchool);
 router.put('/:id', auth, authorize(['Admin', 'Country Director']), schoolRules, validate, updateSchool);
 router.patch('/:id/status', auth, authorize(['Admin', 'Country Director']), toggleSchoolStatus);
-router.delete('/:id', auth, authorize(['Admin']), deleteSchool);
+router.delete('/:id', auth, authorize(['Administrator']), deleteSchool);
 
 // Scholar Progression (Promote logic)
 router.get('/progression/review', auth, authorize(['Admin', 'Country Director']), getScholarsForPromotion);

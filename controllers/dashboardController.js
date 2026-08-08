@@ -98,12 +98,32 @@ const getDashboardStats = async (req, res, next) => {
         const canApproveScholars = ['Administrator', 'Admin', 'Country Director', 'Program Coordinator', 'Program Manager'].includes(userRole);
 
         if (canApproveScholars) {
-            pendingScholars.forEach(s => approvalsSummary.push({ title: 'New Scholar Registration', desc: s.fullName, time: 'Action Required', type: 'scholar' }));
+            pendingScholars.forEach(s => approvalsSummary.push({
+                title: 'New Scholar Registration',
+                desc: s.fullName,
+                time: s.createdAt || s.created_at,
+                type: 'scholar'
+            }));
+            pendingPayments.forEach(p => approvalsSummary.push({
+                title: 'Payment Disbursement',
+                desc: `MWK ${p.amount} for ${p.scholarId?.fullName || 'Scholar'}`,
+                time: p.createdAt || p.created_at,
+                type: 'payment'
+            }));
         }
-        pendingEvents.forEach(e => approvalsSummary.push({ title: 'New Event Proposal', desc: e.title, time: 'Action Required', type: 'event' }));
+        pendingEvents.forEach(e => approvalsSummary.push({
+            title: 'New Event Proposal',
+            desc: e.title,
+            time: e.createdAt || e.created_at,
+            type: 'event'
+        }));
+
+        // Sort approvals by time descending
+        approvalsSummary.sort((a, b) => new Date(b.time) - new Date(a.time));
 
         const pScholarsCount = await Scholar.countDocuments({ ...baseFilter, status: 'Pending' });
         const pEventsCount = await Event.countDocuments({ status: 'Pending' });
+        const pPaymentsCount = await Payment.countDocuments({ status: 'Pending' });
 
         const riskStats = await Scholar.aggregate([
             { $match: { ...baseFilter, schoolType: level, status: 'Active' } },
@@ -217,8 +237,9 @@ const getDashboardStats = async (req, res, next) => {
             performanceSeries,
             engagementSeries,
             regions,
-            pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount,
+            pendingCount: (canApproveScholars ? (pScholarsCount + pPaymentsCount) : 0) + pEventsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
+            pendingPaymentsCount: canApproveScholars ? pPaymentsCount : 0,
             approvals: approvalsSummary,
             schools: schoolsRisks
         };

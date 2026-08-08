@@ -59,13 +59,13 @@ router.get('/preferences', auth, getUserSettings);
 router.put('/preferences', auth, updateUserSettings);
 
 // 3. Organisation Profile (Admin Only)
-router.get('/organisation', auth, authorize(['Admin', 'Country Director']), getOrganisationProfile);
-router.put('/organisation', auth, authorize(['Admin', 'Country Director']), updateOrganisationProfile);
+router.get('/organisation', auth, authorize(['Administrator', 'Country Director']), getOrganisationProfile);
+router.put('/organisation', auth, authorize(['Administrator', 'Country Director']), updateOrganisationProfile);
 
 // 4. Backup & Restore (Admin Only)
-router.get('/backup', auth, authorize(['Admin']), getBackupInfo);
-router.put('/backup/settings', auth, authorize(['Admin']), updateBackupSettings);
-router.post('/backup/run', auth, authorize(['Admin']), runBackup);
-router.post('/backup/restore', auth, authorize(['Admin']), restoreBackup);
+router.get('/backup', auth, authorize(['Administrator']), getBackupInfo);
+router.put('/backup/settings', auth, authorize(['Administrator']), updateBackupSettings);
+router.post('/backup/run', auth, authorize(['Administrator']), runBackup);
+router.post('/backup/restore', auth, authorize(['Administrator']), restoreBackup);
 
 module.exports = router;

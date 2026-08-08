@@ -136,26 +136,29 @@ const getSchoolResults = async (req, res, next) => {
         const { schoolId, year } = req.query;
         const filter = {};
 
-        if (schoolId) {
+        if (schoolId && schoolId !== 'null' && schoolId !== 'undefined' && schoolId !== '') {
             const scholarIds = await Scholar.find({ schoolId }).distinct('_id');
             filter.scholarId = { $in: scholarIds };
         }
 
-        if (year) filter.year = parseInt(year);
+        if (year && year !== 'null' && year !== 'undefined' && year !== '') filter.year = parseInt(year);
 
         const results = await AcademicResult.find(filter)
             .populate('scholarId subjectId')
             .sort({ year: -1 });
 
-        const mappedResults = results.map(r => ({
-            ...r.toObject(),
-            marks: parseFloat(r.marks),
-            gpa: r.semester ? r.gradePoint : null,
-            points: r.term ? r.gradePoint : null,
-            subject_name: r.subjectId ? r.subjectId.name : 'N/A',
-            subject_code: r.subjectId ? r.subjectId.code : 'N/A',
-            scholar_id: r.scholarId._id.toString()
-        }));
+        const mappedResults = results.map(r => {
+            const resultObj = r.toObject();
+            return {
+                ...resultObj,
+                marks: parseFloat(r.marks),
+                gpa: r.semester ? r.gradePoint : null,
+                points: r.term ? r.gradePoint : null,
+                subject_name: r.subjectId ? r.subjectId.name : 'N/A',
+                subject_code: r.subjectId ? r.subjectId.code : 'N/A',
+                scholar_id: r.scholarId ? (r.scholarId._id ? r.scholarId._id.toString() : r.scholarId.toString()) : 'N/A'
+            };
+        });
 
         return successResponse(res, mappedResults);
     } catch (err) {

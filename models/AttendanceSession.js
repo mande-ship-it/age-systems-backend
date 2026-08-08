@@ -19,4 +19,8 @@ const attendanceSessionSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
+attendanceSessionSchema.virtual('session_date').get(function() {
+    return this.sessionDate;
+});
+
 module.exports = mongoose.model('AttendanceSession', attendanceSessionSchema);

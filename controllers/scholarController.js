@@ -87,6 +87,10 @@ const createScholar = async (req, res, next) => {
     try {
         const scholarData = { ...req.body };
 
+        // Ensure scholarId is not passed from frontend during registration
+        delete scholarData.scholarId;
+        delete scholarData.scholar_id;
+
         // Security: Field Officers can only register scholars for their own district
         if (req.user && req.user.role && req.user.role.toLowerCase().includes('field')) {
             if (req.user.assignedDistrict) {
@@ -122,8 +126,23 @@ const createScholar = async (req, res, next) => {
             scholarData.yearsCompleted = 0;
         }
 
-        const scholar = new Scholar(scholarData);
-        await scholar.save();
+        let scholar = new Scholar(scholarData);
+
+        try {
+            await scholar.save();
+        } catch (saveErr) {
+            // Handle race condition for auto-generated scholarId
+            if (saveErr.code === 11000 && saveErr.keyPattern && saveErr.keyPattern.scholarId) {
+                console.log('[RETRY] Scholar ID clash detected, retrying registration...');
+                // Re-instantiate to trigger pre-save hook logic again with fresh DB state
+                // We clear scholarId so the hook re-generates it
+                delete scholarData.scholarId;
+                scholar = new Scholar(scholarData);
+                await scholar.save();
+            } else {
+                throw saveErr;
+            }
+        }
 
         // Return fully populated scholar for immediate frontend display
         const populatedScholar = await Scholar.getById(scholar._id);

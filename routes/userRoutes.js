@@ -17,12 +17,12 @@ const auth = require('../middleware/authMiddleware');
 const authorize = require('../middleware/roleMiddleware');
 
 // User Management (Admin only)
-router.get('/', auth, authorize(['Admin', 'Country Director']), getAllUsers);
-router.get('/active', auth, authorize(['Admin', 'Country Director']), getActiveUsers);
+router.get('/', auth, authorize(['Administrator', 'Country Director']), getAllUsers);
+router.get('/active', auth, authorize(['Administrator', 'Country Director']), getActiveUsers);
 router.get('/director', getDirector);
-router.get('/:id', auth, authorize(['Admin', 'Country Director']), getUserById);
-router.post('/', auth, authorize(['Admin', 'Country Director']), createUserRules, validate, createUser);
-router.put('/:id', auth, authorize(['Admin', 'Country Director']), updateUser);
-router.delete('/:id', auth, authorize(['Admin']), deleteUser);
+router.get('/:id', auth, authorize(['Administrator', 'Country Director']), getUserById);
+router.post('/', auth, authorize(['Administrator', 'Country Director']), createUserRules, validate, createUser);
+router.put('/:id', auth, authorize(['Administrator', 'Country Director']), updateUser);
+router.delete('/:id', auth, authorize(['Administrator']), deleteUser);
 
 module.exports = router;

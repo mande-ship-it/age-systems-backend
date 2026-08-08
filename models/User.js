@@ -44,4 +44,8 @@ userSchema.virtual('department_name').get(function() {
     return this.departmentId ? this.departmentId.name : 'Unassigned';
 });
 
+userSchema.statics.getAll = function() {
+    return this.find().populate('roleId departmentId').sort({ fullName: 1 });
+};
+
 module.exports = mongoose.model('User', userSchema);
