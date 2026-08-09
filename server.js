@@ -61,6 +61,26 @@ io.on('connection', (socket) => {
         console.log(`User ${userId} joined their notification room.`);
     });
 
+    socket.on('join_meeting', (meetingId) => {
+        socket.join(`meeting_${meetingId}`);
+        console.log(`User joined meeting room: meeting_${meetingId}`);
+    });
+
+    socket.on('meeting_message', (data) => {
+        // Broadcast to everyone in the meeting room
+        io.to(`meeting_${data.meetingId}`).emit('new_meeting_message', data);
+    });
+
+    socket.on('initiate_call', (data) => {
+        // data contains: meetingId, participants (array of user IDs), callerName, isVideo
+        const { participants, meetingId } = data;
+        if (participants && Array.isArray(participants)) {
+            participants.forEach(userId => {
+                io.to(`user_${userId}`).emit('incoming_call', data);
+            });
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log('Client disconnected');
     });
