@@ -301,6 +301,57 @@ const sendInternshipAllocationEmail = async ({
     }
 };
 
+/**
+ * SEND MEETING NOTIFICATION EMAIL
+ */
+const sendMeetingNotificationEmail = async ({ email, name, meeting }) => {
+    try {
+        const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+        // The link will direct them to the login page with a redirect instruction
+        const redirectUrl = `${loginUrl}/login?redirect=/events/live-meeting-join&id=${meeting._id}`;
+
+        await sendEmail({
+            to: email,
+            subject: `Meeting Invitation: ${meeting.title}`,
+            html: htmlWrapper(
+                `Meeting Invitation`,
+                `
+                    <p>Hello ${name},</p>
+                    <p>You have been invited to a live meeting on the AGE Africa Scholar Management System.</p>
+                    <div style="background: #f9f9f9; padding: 15px; border-radius: 8px; border-left: 4px solid #9AB334;">
+                        <h3 style="margin-top: 0; color: #4C3C32;">${meeting.title}</h3>
+                        <p><b>Description:</b> ${meeting.description || 'No description provided.'}</p>
+                        <p><b>Date:</b> ${new Date(meeting.meetingDate).toDateString()}</p>
+                        <p><b>Time:</b> ${meeting.meetingTime || 'TBD'}</p>
+                    </div>
+                    <p>To attend this meeting, please click the button below to log in to the system. You will be redirected to the meeting room where you can join the video conference.</p>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${redirectUrl}" style="
+                            background-color: #9AB334;
+                            color: white;
+                            padding: 14px 28px;
+                            text-decoration: none;
+                            border-radius: 8px;
+                            font-weight: bold;
+                            display: inline-block;
+                        ">LOG IN TO JOIN MEETING</a>
+                    </div>
+
+                    <p style="font-size: 12px; color: #666;">
+                        If the button above doesn't work, copy and paste this link into your browser:<br/>
+                        ${redirectUrl}
+                    </p>
+                `
+            ),
+        });
+        return true;
+    } catch (err) {
+        console.log("❌ MEETING NOTIFICATION EMAIL ERROR:", err.message);
+        return false;
+    }
+};
+
 module.exports = {
     sendEmail,
     sendOTP,
@@ -308,5 +359,6 @@ module.exports = {
     sendPasswordResetEmail,
     sendDutyAssignmentEmail,
     sendEventNotificationEmail,
-    sendInternshipAllocationEmail
+    sendInternshipAllocationEmail,
+    sendMeetingNotificationEmail
 };

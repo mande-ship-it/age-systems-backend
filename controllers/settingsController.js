@@ -36,7 +36,15 @@ const updateAccountProfile = async (req, res, next) => {
         delete updateData.department_id;
 
         const updated = await User.findByIdAndUpdate(req.user.id, updateData, { new: true }).populate('roleId departmentId');
-        return successResponse(res, updated, 'Profile updated.');
+        if (!updated) return errorResponse(res, 'User not found.', 404);
+
+        const userObj = updated.toObject();
+        if (userObj.profilePicture && userObj.profilePicture.includes('uploads/')) {
+            const parts = userObj.profilePicture.split('uploads/');
+            userObj.profilePicture = 'uploads/' + parts[parts.length - 1];
+        }
+
+        return successResponse(res, userObj, 'Profile updated.');
     } catch (err) {
         next(err);
     }

@@ -35,7 +35,13 @@ const getUserById = async (req, res, next) => {
         const user = await User.findById(id).populate('roleId departmentId');
         if (!user) return errorResponse(res, 'User not found', 404);
 
-        return successResponse(res, user);
+        const userObj = user.toObject();
+        if (userObj.profilePicture && userObj.profilePicture.includes('uploads/')) {
+            const parts = userObj.profilePicture.split('uploads/');
+            userObj.profilePicture = 'uploads/' + parts[parts.length - 1];
+        }
+
+        return successResponse(res, userObj);
     } catch (err) {
         next(err);
     }
@@ -142,9 +148,15 @@ const updateUser = async (req, res, next) => {
 
         if (!updated) return errorResponse(res, 'User not found.', 404);
 
+        const userObj = updated.toObject();
+        if (userObj.profilePicture && userObj.profilePicture.includes('uploads/')) {
+            const parts = userObj.profilePicture.split('uploads/');
+            userObj.profilePicture = 'uploads/' + parts[parts.length - 1];
+        }
+
         await NotificationService.notifyAll(`📝 User updated: ${updated.fullName}`, 'info', req.user ? req.user.fullName : 'System');
 
-        return successResponse(res, updated, 'User profile updated successfully.');
+        return successResponse(res, userObj, 'User profile updated successfully.');
     } catch (err) {
         console.error('updateUser error:', err);
         next(err);
