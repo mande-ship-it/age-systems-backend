@@ -53,8 +53,8 @@ const getDepartmentUsers = async (req, res, next) => {
  */
 const createDepartment = async (req, res, next) => {
     try {
-        const { name, description, code } = req.body;
-        const newDept = new Department({ name, description, code });
+        const { name, description, code, defaultDashboard } = req.body;
+        const newDept = new Department({ name, description, code, defaultDashboard });
         await newDept.save();
 
         await NotificationService.notifyAll(`🏢 New Department created: ${name}`, 'info', req.user ? req.user.fullName : 'System');
