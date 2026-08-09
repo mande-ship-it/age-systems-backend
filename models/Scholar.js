@@ -8,7 +8,7 @@ const scholarSchema = new mongoose.Schema({
     schoolId: { type: mongoose.Schema.Types.ObjectId, ref: 'School' },
     sponsorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Sponsor' },
     dob: { type: String },
-    sex: { type: String, enum: ['Female', 'Male'], default: 'Female' },
+    sex: { type: String, enum: ['Female', 'Male', 'Other'], default: 'Female' },
     phone: { type: String },
     village: { type: String },
     district: { type: String },
