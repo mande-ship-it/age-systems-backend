@@ -92,7 +92,7 @@ const htmlWrapper = (title, content) => `
 const sendOTP = async (user, otp, password, roleName = null) => {
     const name = user.fullName || user.full_name || 'User';
     const role = roleName || user.role_name || 'Staff Member';
-    const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const loginUrl = process.env.FRONTEND_URL || "https://scholar-management-system.onrender.com";
 
     const title = `Welcome ${name}`;
     const content = `
@@ -246,7 +246,7 @@ const sendDutyAssignmentEmail = async ({
  */
 const sendEventNotificationEmail = async ({ email, name, event }) => {
     try {
-        const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+        const loginUrl = process.env.FRONTEND_URL || "https://scholar-management-system.onrender.com";
 
         await sendEmail({
             to: email,
@@ -334,7 +334,7 @@ const sendInternshipAllocationEmail = async ({
  */
 const sendMeetingNotificationEmail = async ({ email, name, meeting }) => {
     try {
-        const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+        const loginUrl = process.env.FRONTEND_URL || "https://scholar-management-system.onrender.com";
         // The link will direct them to the login page with a redirect instruction
         const redirectUrl = `${loginUrl}/login?redirect=/events/live-meeting-join&id=${meeting._id}`;
 
