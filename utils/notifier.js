@@ -92,6 +92,7 @@ const htmlWrapper = (title, content) => `
 const sendOTP = async (user, otp, password, roleName = null) => {
     const name = user.fullName || user.full_name || 'User';
     const role = roleName || user.role_name || 'Staff Member';
+    const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
 
     const title = `Welcome ${name}`;
     const content = `
@@ -118,6 +119,18 @@ const sendOTP = async (user, otp, password, roleName = null) => {
             border: 1px dashed #E05B1C;
         ">
           ${otp}
+        </div>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="${loginUrl}" style="
+                background-color: #4C3C32;
+                color: white;
+                padding: 14px 28px;
+                text-decoration: none;
+                border-radius: 8px;
+                font-weight: bold;
+                display: inline-block;
+            ">ACCESS SYSTEM PORTAL</a>
         </div>
 
         <p style="font-size: 13px; color: #666;">
@@ -233,6 +246,8 @@ const sendDutyAssignmentEmail = async ({
  */
 const sendEventNotificationEmail = async ({ email, name, event }) => {
     try {
+        const loginUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+
         await sendEmail({
             to: email,
             subject: `New Event: ${event.title}`,
@@ -251,6 +266,19 @@ const sendEventNotificationEmail = async ({ email, name, event }) => {
                     </div>
                     <p><b>Description:</b></p>
                     <p>${event.description || 'No description provided.'}</p>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="${loginUrl}" style="
+                            background-color: #9AB334;
+                            color: white;
+                            padding: 14px 28px;
+                            text-decoration: none;
+                            border-radius: 8px;
+                            font-weight: bold;
+                            display: inline-block;
+                        ">VIEW EVENT DETAILS</a>
+                    </div>
+
                     <p>Please log in to the system for more details.</p>
                 `
             ),
