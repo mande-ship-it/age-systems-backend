@@ -17,4 +17,4 @@ services:
       - key: BREVO_API_KEY
         sync: false # Set this in Render Dashboard
       - key: FRONTEND_URL
-        value: https://your-app-name.onrender.com
+        value: https://scholar-management-system.onrender.com
