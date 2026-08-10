@@ -222,7 +222,17 @@ const deleteScholar = async (req, res, next) => {
 const getScholarsBySchool = async (req, res, next) => {
     try {
         const { schoolId } = req.query;
-        const query = applyDistrictFilter(req, { schoolId });
+
+        let baseFilter = {};
+        if (schoolId && mongoose.Types.ObjectId.isValid(schoolId)) {
+            baseFilter.schoolId = schoolId;
+        } else if (schoolId) {
+            // If it's not a valid ObjectId but exists, maybe it's a school name or code?
+            // Or just return empty to be safe
+            return successResponse(res, [], 'Invalid school ID provided.');
+        }
+
+        const query = applyDistrictFilter(req, baseFilter);
 
         const scholars = await Scholar.find(query).sort({ fullName: 1 });
         return successResponse(res, scholars);
