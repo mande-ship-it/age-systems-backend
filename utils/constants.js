@@ -11,15 +11,7 @@ const SCHOLAR_STATUS = {
     SUSPENDED: 'Suspended'
 };
 
-const PAYMENT_STATUS = {
-    PENDING: 'Pending',
-    COMPLETED: 'Completed',
-    FAILED: 'Failed',
-    REFUNDED: 'Refunded'
-};
-
 module.exports = {
     ROLES,
-    SCHOLAR_STATUS,
-    PAYMENT_STATUS
+    SCHOLAR_STATUS
 };

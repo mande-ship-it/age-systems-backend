@@ -1,6 +1,5 @@
 const Scholar = require('../models/Scholar');
 const Event = require('../models/Event');
-const Payment = require('../models/Payment');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
@@ -11,13 +10,11 @@ const getPendingActivities = async (req, res, next) => {
     try {
         const scholars = await Scholar.find({ status: 'Pending' }).populate('schoolId sponsorId userId');
         const events = await Event.find({ status: 'Pending' });
-        const payments = await Payment.find({ status: 'Pending' }).populate('scholarId');
 
         return successResponse(res, {
             scholars,
             events,
-            payments,
-            totalCount: scholars.length + events.length + payments.length
+            totalCount: scholars.length + events.length
         }, 'Pending activities retrieved successfully.');
     } catch (err) {
         next(err);
@@ -48,12 +45,6 @@ const approveActivity = async (req, res, next) => {
                 result = await Event.findByIdAndUpdate(id, { status: 'Active' }, { new: true });
                 if (result) {
                     await NotificationService.notifyAll(`✅ Event approved: ${result.title}`, 'success', req.user?.fullName);
-                }
-                break;
-            case 'payment':
-                result = await Payment.findByIdAndUpdate(id, { status: 'Completed' }, { new: true });
-                if (result) {
-                    await NotificationService.notifyAll(`💰 Payment disbursement approved: MWK ${result.amount}`, 'success', req.user?.fullName);
                 }
                 break;
             default:
@@ -92,12 +83,6 @@ const rejectActivity = async (req, res, next) => {
                 result = await Event.findByIdAndDelete(id);
                 if (result) {
                     await NotificationService.notifyAll(`❌ Event creation rejected: "${result.title}"`, 'warning', req.user?.fullName || 'System');
-                }
-                break;
-            case 'payment':
-                result = await Payment.findByIdAndUpdate(id, { status: 'Failed' }, { new: true });
-                if (result) {
-                    await NotificationService.notifyAll(`❌ Payment disbursement rejected: MWK ${result.amount}`, 'warning', req.user?.fullName || 'System');
                 }
                 break;
             default:

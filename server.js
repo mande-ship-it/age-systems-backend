@@ -27,7 +27,6 @@ const aiRoutes = require('./routes/aiRoutes');
 const internshipRoutes = require('./routes/internshipRoutes');
 const departmentRoutes = require('./routes/departmentRoutes');
 const performanceRoutes = require('./routes/performanceRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
 const meetingRoutes = require('./routes/meetingRoutes');
 
 // Import schedulers
@@ -129,7 +128,6 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/internships', internshipRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/performance', performanceRoutes);
-app.use('/api/payments', paymentRoutes);
 app.use('/api/meetings', meetingRoutes);
 
 app.use(errorHandler);

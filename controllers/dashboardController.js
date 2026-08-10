@@ -2,7 +2,6 @@ const Scholar = require('../models/Scholar');
 const Sponsor = require('../models/Sponsor');
 const School = require('../models/School');
 const Event = require('../models/Event');
-const Payment = require('../models/Payment');
 const AcademicResult = require('../models/AcademicResult');
 const Attendance = require('../models/Attendance');
 const User = require('../models/User');
@@ -89,10 +88,9 @@ const getDashboardStats = async (req, res, next) => {
         });
 
         // 5. Pending Total & Summary
-        const [pendingScholars, pendingEvents, pendingPayments] = await Promise.all([
+        const [pendingScholars, pendingEvents] = await Promise.all([
             Scholar.find({ ...baseFilter, status: 'Pending' }).limit(5),
-            Event.find({ status: 'Pending' }).limit(5),
-            Payment.find({ status: 'Pending' }).limit(5)
+            Event.find({ status: 'Pending' }).limit(5)
         ]);
 
         const approvalsSummary = [];
@@ -105,12 +103,6 @@ const getDashboardStats = async (req, res, next) => {
                 desc: s.fullName,
                 time: s.createdAt || s.created_at,
                 type: 'scholar'
-            }));
-            pendingPayments.forEach(p => approvalsSummary.push({
-                title: 'Payment Disbursement',
-                desc: `MWK ${p.amount} for ${p.scholarId?.fullName || 'Scholar'}`,
-                time: p.createdAt || p.created_at,
-                type: 'payment'
             }));
         }
         pendingEvents.forEach(e => approvalsSummary.push({
@@ -125,7 +117,6 @@ const getDashboardStats = async (req, res, next) => {
 
         const pScholarsCount = await Scholar.countDocuments({ ...baseFilter, status: 'Pending' });
         const pEventsCount = await Event.countDocuments({ status: 'Pending' });
-        const pPaymentsCount = await Payment.countDocuments({ status: 'Pending' });
 
         const riskStats = await Scholar.aggregate([
             { $match: { ...baseFilter, schoolType: level, status: 'Active' } },
@@ -259,9 +250,8 @@ const getDashboardStats = async (req, res, next) => {
             engagementSeries,
             regions,
             operationalLog, // Added this
-            pendingCount: (canApproveScholars ? (pScholarsCount + pPaymentsCount) : 0) + pEventsCount,
+            pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
-            pendingPaymentsCount: canApproveScholars ? pPaymentsCount : 0,
             approvals: approvalsSummary,
             schools: schoolsRisks
         };

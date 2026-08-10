@@ -1,7 +1,6 @@
 const Scholar = require('../models/Scholar');
 const AcademicResult = require('../models/AcademicResult');
 const Document = require('../models/Document');
-const Payment = require('../models/Payment');
 const Attendance = require('../models/Attendance');
 const Internship = require('../models/Internship');
 const { successResponse, errorResponse } = require('../utils/response');
@@ -41,10 +40,9 @@ const getScholarById = async (req, res, next) => {
         if (!scholar) return errorResponse(res, 'Scholar not found or access denied for this district.', 404);
 
         // Fetch all related data in parallel
-        const [results, documents, payments, attendance, internship] = await Promise.all([
+        const [results, documents, attendance, internship] = await Promise.all([
             AcademicResult.find({ scholarId: scholar._id }).populate('subjectId'),
             Document.find({ scholarId: scholar._id }),
-            Payment.find({ scholarId: scholar._id }),
             Attendance.find({ scholarId: scholar._id }).populate('sessionId'),
             Internship.findOne({ scholarId: scholar._id })
         ]);
@@ -61,13 +59,11 @@ const getScholarById = async (req, res, next) => {
             ...scholar.toObject(),
             academic_results: results,
             documents: documents,
-            payments: payments,
             attendance_history: attendance,
             internship: internship,
             summary: {
                 average_mark: averageMark.toFixed(1),
                 total_subjects: results.length,
-                total_payments: payments.length,
                 attendance_rate: attendance.length > 0
                     ? ((attendance.filter(a => a.status === 'present').length / attendance.length) * 100).toFixed(1)
                     : "0.0"

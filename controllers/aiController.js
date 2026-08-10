@@ -5,7 +5,6 @@ const Attendance = require('../models/Attendance');
 const User = require('../models/User');
 const School = require('../models/School');
 const Sponsor = require('../models/Sponsor');
-const Payment = require('../models/Payment');
 const Event = require('../models/Event');
 const Department = require('../models/Department');
 const OrganisationProfile = require('../models/OrganisationProfile');
@@ -46,13 +45,12 @@ const chatWithAI = async (req, res, next) => {
             const sId = scholarMatch[0].toUpperCase();
             const scholar = await Scholar.findOne({ scholarId: sId }).populate('schoolId sponsorId');
             if (scholar) {
-                const [academics, attendanceStats, payments] = await Promise.all([
+                const [academics, attendanceStats] = await Promise.all([
                     AcademicResult.find({ scholarId: scholar._id }).populate('subjectId').sort({ year: -1 }),
                     Attendance.aggregate([
                         { $match: { scholarId: scholar._id } },
                         { $group: { _id: null, present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } }, total: { $sum: 1 } } }
-                    ]),
-                    Payment.find({ scholarId: scholar._id }).sort({ paymentDate: -1 })
+                    ])
                 ]);
                 const attRate = attendanceStats[0]?.total > 0 ? ((attendanceStats[0].present / attendanceStats[0].total) * 100).toFixed(1) : '0.0';
 
@@ -67,8 +65,7 @@ const chatWithAI = async (req, res, next) => {
                 - Assigned Donor: ${scholar.donor}
                 - Program: ${scholar.programName} (${scholar.programType})
                 - Academic Records: ${JSON.stringify(academics.map(a => ({ sub: a.subjectId?.name, marks: a.marks, yr: a.year, period: a.term || a.semester })))}
-                - Attendance Rate: ${attRate}%
-                - Financial History: ${JSON.stringify(payments.map(p => ({ amt: p.amount, for: p.purpose, status: p.status })))}`;
+                - Attendance Rate: ${attRate}%`;
             }
         } else if (lastUserMessage.includes('analyze') || lastUserMessage.includes('who is')) {
              // Try searching by name if ID not found
