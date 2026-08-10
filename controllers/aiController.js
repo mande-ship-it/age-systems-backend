@@ -3,6 +3,12 @@ const Scholar = require('../models/Scholar');
 const AcademicResult = require('../models/AcademicResult');
 const Attendance = require('../models/Attendance');
 const User = require('../models/User');
+const School = require('../models/School');
+const Sponsor = require('../models/Sponsor');
+const Payment = require('../models/Payment');
+const Event = require('../models/Event');
+const Department = require('../models/Department');
+const OrganisationProfile = require('../models/OrganisationProfile');
 const { successResponse, errorResponse } = require('../utils/response');
 const NotificationService = require('../utils/notificationService');
 
@@ -11,8 +17,8 @@ const groq = new Groq({
 });
 
 /**
- * Perfected AI Analytical Engine
- * Deep-linked to scholar details, academics, institutions and risk reporting.
+ * Ultimate AI Strategic Engine
+ * Connected to every core model in the system for deep analysis.
  */
 const chatWithAI = async (req, res, next) => {
     try {
@@ -22,10 +28,8 @@ const chatWithAI = async (req, res, next) => {
             return errorResponse(res, 'Message is required', 400);
         }
 
-        // 1. DYNAMIC DATA HARVESTING
+        // 1. SCHOLAR CONTEXT (SPECIFIC)
         let specificScholarContext = null;
-
-        // Try to identify if a specific scholar is being discussed
         const scholarMatch = message.match(/AGE-\d+/i) || (targetId && targetId.toString().startsWith('AGE-') ? [targetId] : null);
 
         if (scholarMatch) {
@@ -33,75 +37,103 @@ const chatWithAI = async (req, res, next) => {
             const scholar = await Scholar.findOne({ scholarId: sId }).populate('schoolId sponsorId');
 
             if (scholar) {
-                const academics = await AcademicResult.find({ scholarId: scholar._id })
-                    .populate('subjectId')
-                    .sort({ year: -1 });
+                const [academics, attendanceStats, payments] = await Promise.all([
+                    AcademicResult.find({ scholarId: scholar._id }).populate('subjectId').sort({ year: -1 }),
+                    Attendance.aggregate([
+                        { $match: { scholarId: scholar._id } },
+                        { $group: {
+                            _id: null,
+                            present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
+                            total: { $sum: 1 }
+                        }}
+                    ]),
+                    Payment.find({ scholarId: scholar._id }).sort({ paymentDate: -1 })
+                ]);
 
-                const attendanceCount = await Attendance.countDocuments({ scholarId: scholar._id });
-                const presentCount = await Attendance.countDocuments({ scholarId: scholar._id, status: 'present' });
-                const attendanceRate = attendanceCount > 0 ? ((presentCount / attendanceCount) * 100).toFixed(1) : '0.0';
+                const attRate = attendanceStats[0]?.total > 0 ? ((attendanceStats[0].present / attendanceStats[0].total) * 100).toFixed(1) : '0.0';
 
                 specificScholarContext = {
                     profile: scholar,
-                    academics: academics.map(a => ({
-                        subject_name: a.subjectId?.name || 'Unknown',
-                        marks: a.marks,
-                        year: a.year
-                    })),
-                    attendance: attendanceRate
+                    academics: academics.map(a => ({ subject: a.subjectId?.name, marks: a.marks, year: a.year, period: a.term || a.semester })),
+                    attendance: attRate,
+                    financials: payments.map(p => ({ amount: p.amount, purpose: p.purpose, status: p.status }))
                 };
             }
         }
 
-        // 2. GLOBAL SYSTEM CONTEXT
-        const [totalScholars, activeScholars, avgMarksRes, attStats] = await Promise.all([
-            Scholar.countDocuments(),
-            Scholar.countDocuments({ status: 'Active' }),
-            AcademicResult.aggregate([{ $group: { _id: null, avg: { $avg: "$marks" } } }]),
-            Attendance.aggregate([
-                { $group: {
-                    _id: null,
-                    present: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
-                    total: { $sum: 1 }
-                }}
-            ])
+        // 2. GLOBAL SYSTEM AGGREGATIONS (The "Whole Database" View)
+        const [
+            globalScholarStats,
+            globalAcademicStats,
+            globalAttendanceStats,
+            globalSchoolStats,
+            globalSponsorStats,
+            globalPaymentStats,
+            globalEventStats,
+            globalDeptStats,
+            orgRes
+        ] = await Promise.all([
+            // Scholar distribution
+            Scholar.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+            // Academic performance
+            AcademicResult.aggregate([{ $group: { _id: null, avg: { $avg: "$marks" }, min: { $min: "$marks" }, max: { $max: "$marks" } } }]),
+            // Attendance overall
+            Attendance.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+            // Institutional distribution
+            School.aggregate([{ $group: { _id: "$level", count: { $sum: 1 } } }]),
+            // Sponsorship data
+            Sponsor.aggregate([{ $group: { _id: "$status", totalValue: { $sum: "$amount" }, count: { $sum: 1 } } }]),
+            // Financial flow
+            Payment.aggregate([{ $group: { _id: "$status", total: { $sum: "$amount" } } }]),
+            // Operational activity
+            Event.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
+            // Human resources
+            Department.aggregate([{ $group: { _id: null, count: { $sum: 1 } } }]),
+            // Organisation Branding
+            OrganisationProfile.findOne()
         ]);
 
-        const globalAvg = avgMarksRes[0]?.avg?.toFixed(1) || '0.0';
-        const globalAtt = attStats[0]?.total > 0 ? ((attStats[0].present / attStats[0].total) * 100).toFixed(1) : '0.0';
-
-        const cohorts = await Scholar.aggregate([
-            { $match: { startYear: { $ne: null } } },
-            { $group: { _id: "$startYear", count: { $sum: 1 } } },
-            { $sort: { _id: -1 } },
-            { $limit: 4 }
-        ]);
+        // Construct simplified context for the LLM
+        const dbSummary = {
+            organisation: orgRes ? { name: orgRes.name, type: orgRes.type } : { name: 'AGE Africa', type: 'Non-Profit' },
+            scholars: globalScholarStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {}),
+            academics: {
+                average: globalAcademicStats[0]?.avg?.toFixed(1) || '0.0',
+                range: `${globalAcademicStats[0]?.min || 0}% - ${globalAcademicStats[0]?.max || 0}%`
+            },
+            attendance: globalAttendanceStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {}),
+            institutions: globalSchoolStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {}),
+            sponsorship: globalSponsorStats.reduce((acc, curr) => ({ ...acc, [curr._id]: { count: curr.count, value: curr.totalValue } }), {}),
+            financials: globalPaymentStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.total }), {}),
+            events: globalEventStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {}),
+            departments: globalDeptStats[0]?.count || 0
+        };
 
         // 3. SYSTEM PROMPT REFINEMENT
         const systemPrompt = `
-            ROLE: Senior Strategic AI Analyst for AGE Africa.
-            OBJECTIVE: Generate original, smart analytics, planning recommendations, and data-driven reports.
+            ROLE: Senior Strategic AI Data Analyst for ${dbSummary.organisation.name}.
+            CONTEXT: You have full real-time read-access to the ${dbSummary.organisation.name} Scholar Management System database.
 
-            GLOBAL STATE:
-            - Scholars: ${totalScholars} total (${activeScholars} active).
-            - Performance: ${globalAvg}% avg marks, ${globalAtt}% attendance.
-            - Cohorts: ${cohorts.map(c => `Cohort ${c._id}: ${c.count}`).join(', ')}.
+            GLOBAL DATABASE STATE:
+            ${JSON.stringify(dbSummary, null, 2)}
 
             ${specificScholarContext ? `
-            SPECIFIC SCHOLAR UNDER ANALYSIS:
-            - Name: ${specificScholarContext.profile.fullName} (${specificScholarContext.profile.scholarId})
-            - Institution: ${specificScholarContext.profile.schoolId?.name || 'N/A'}
-            - Current Status: ${specificScholarContext.profile.status}
-            - Academic Profile: ${JSON.stringify(specificScholarContext.academics)}
-            - Attendance Record: ${specificScholarContext.attendance}%
+            FOCUSED SCHOLAR ANALYSIS:
+            - Identity: ${specificScholarContext.profile.fullName} (${specificScholarContext.profile.scholarId})
+            - School: ${specificScholarContext.profile.schoolId?.name || 'Unknown'}
+            - Attendance: ${specificScholarContext.attendance}%
+            - Academic Performance: ${JSON.stringify(specificScholarContext.academics)}
+            - Financial History: ${JSON.stringify(specificScholarContext.financials)}
             ` : ''}
 
-            INSTRUCTIONS:
-            1. BE SMART & ORIGINAL: When asked to analyze, perform cross-table logic.
-            2. GENERATE REPORTS: If asked for a "Report Card" or "Performance Analysis", use a professional markdown structure with ⭐ stars.
-            3. PREDICTIVE INSIGHTS: Estimate future performance and graduation likelihood.
-            4. ACTIONABLE PLANNING: Suggest specific interventions (CHATs, counseling, school visits).
-            5. RISK ALERTS: If you detect a severe risk (Attendance < 50% or Marks < 40%), end your message with "[TRIGGER_ALERT: {Scholar Name} - {Reason}]".
+            OPERATIONAL GUIDELINES:
+            1. DATA INTERPRETATION: Look for correlations (e.g., does low attendance correlate with low marks?).
+            2. STRATEGIC PLANNING: Use the database state to suggest where resources should be allocated (e.g., which schools need more support?).
+            3. FINANCIAL AUDIT: If asked about money, refer to the "financials" and "sponsorship" data provided.
+            4. SMART REPORTING: Format reports in professional markdown with clear headings, bold text, and appropriate emojis.
+            5. RISK DETECTION: Proactively flag anomalies you see in the data provided.
+
+            If you detect a severe risk to a scholar's progression (Attendance < 50% or Marks < 40%), append "[TRIGGER_ALERT: {Scholar Name} - {Reason}]" to your reply.
         `;
 
         // 4. GROQ API CALL
@@ -111,27 +143,27 @@ const chatWithAI = async (req, res, next) => {
                 { role: 'user', content: message }
             ],
             model: 'llama-3.3-70b-versatile',
-            temperature: 0.3,
-            max_tokens: 3000,
+            temperature: 0.2, // Lower temperature for more analytical/factual responses
+            max_tokens: 4000,
         });
 
         let aiReply = chatCompletion.choices[0].message.content;
 
-        // 5. AUTOMATED RISK REPORTING
+        // 5. AUTOMATED RISK DISPATCH
         const alertMatch = aiReply.match(/\[TRIGGER_ALERT: (.*?)\]/);
         if (alertMatch) {
             const alertContent = alertMatch[1];
-            await NotificationService.notifyAll(`⚠️ AI RISK ALERT: ${alertContent}`, 'warning', 'AI Strategic Engine');
-            aiReply = aiReply.replace(/\[TRIGGER_ALERT: .*?\]/, '✅ *A system alert has been automatically dispatched to program managers regarding this risk.*');
+            await NotificationService.notifyAll(`🚨 AI-DETECTED RISK: ${alertContent}`, 'warning', 'AI Analytical Engine');
+            aiReply = aiReply.replace(/\[TRIGGER_ALERT: .*?\]/, '\n\n⚠️ *System Note: An emergency risk alert has been dispatched to administrators based on this analysis.*');
         }
 
         return successResponse(res, {
             reply: aiReply,
-            contextType: specificScholarContext ? 'Individual' : 'Aggregated'
-        }, 'Comprehensive AI strategy generated.');
+            context: specificScholarContext ? 'Individual Profile' : 'System-Wide Aggregate'
+        }, 'Comprehensive system-wide analysis generated.');
 
     } catch (err) {
-        console.error('Groq AI Strategic Engine Error:', err.message);
+        console.error('AI Analytical Engine Error:', err.message);
         next(err);
     }
 };
