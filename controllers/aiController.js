@@ -17,20 +17,28 @@ const groq = new Groq({
 });
 
 /**
- * Ultimate AI Strategic Engine
- * Connected to every core model in the system for deep analysis.
+ * Ultimate AI Strategic Engine - Multi-turn Conversation Mode
+ * Deeply connected to the entire system for conversational data analysis.
  */
 const chatWithAI = async (req, res, next) => {
     try {
-        const { message, currentPage = 'Global', targetId } = req.body;
+        const { messages, message, currentPage = 'Global', targetId } = req.body;
 
-        if (!message) {
-            return errorResponse(res, 'Message is required', 400);
+        // Support both single message and full conversation history
+        let conversation = messages || [];
+        if (conversation.length === 0 && message) {
+            conversation.push({ role: 'user', content: message });
         }
 
-        // 1. SCHOLAR CONTEXT (SPECIFIC)
+        if (conversation.length === 0) {
+            return errorResponse(res, 'Messages are required', 400);
+        }
+
+        const lastUserMessage = conversation[conversation.length - 1].content;
+
+        // 1. DYNAMIC CONTEXT HARVESTING (Always fresh for the analysis)
         let specificScholarContext = null;
-        const scholarMatch = message.match(/AGE-\d+/i) || (targetId && targetId.toString().startsWith('AGE-') ? [targetId] : null);
+        const scholarMatch = lastUserMessage.match(/AGE-\d+/i) || (targetId && targetId.toString().startsWith('AGE-') ? [targetId] : null);
 
         if (scholarMatch) {
             const sId = scholarMatch[0].toUpperCase();
@@ -61,7 +69,7 @@ const chatWithAI = async (req, res, next) => {
             }
         }
 
-        // 2. GLOBAL SYSTEM AGGREGATIONS (The "Whole Database" View)
+        // 2. GLOBAL SYSTEM AGGREGATIONS
         const [
             globalScholarStats,
             globalAcademicStats,
@@ -73,27 +81,17 @@ const chatWithAI = async (req, res, next) => {
             globalDeptStats,
             orgRes
         ] = await Promise.all([
-            // Scholar distribution
             Scholar.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
-            // Academic performance
             AcademicResult.aggregate([{ $group: { _id: null, avg: { $avg: "$marks" }, min: { $min: "$marks" }, max: { $max: "$marks" } } }]),
-            // Attendance overall
             Attendance.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
-            // Institutional distribution
             School.aggregate([{ $group: { _id: "$level", count: { $sum: 1 } } }]),
-            // Sponsorship data
             Sponsor.aggregate([{ $group: { _id: "$status", totalValue: { $sum: "$amount" }, count: { $sum: 1 } } }]),
-            // Financial flow
             Payment.aggregate([{ $group: { _id: "$status", total: { $sum: "$amount" } } }]),
-            // Operational activity
             Event.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
-            // Human resources
             Department.aggregate([{ $group: { _id: null, count: { $sum: 1 } } }]),
-            // Organisation Branding
             OrganisationProfile.findOne()
         ]);
 
-        // Construct simplified context for the LLM
         const dbSummary = {
             organisation: orgRes ? { name: orgRes.name, type: orgRes.type } : { name: 'AGE Africa', type: 'Non-Profit' },
             scholars: globalScholarStats.reduce((acc, curr) => ({ ...acc, [curr._id]: curr.count }), {}),
@@ -109,16 +107,16 @@ const chatWithAI = async (req, res, next) => {
             departments: globalDeptStats[0]?.count || 0
         };
 
-        // 3. SYSTEM PROMPT REFINEMENT
+        // 3. CONTEXTUAL SYSTEM PROMPT
         const systemPrompt = `
             ROLE: Senior Strategic AI Data Analyst for ${dbSummary.organisation.name}.
-            CONTEXT: You have full real-time read-access to the ${dbSummary.organisation.name} Scholar Management System database.
+            CONTEXT: You are in a multi-turn conversation with a system operator. You have full real-time read-access to the system database.
 
             GLOBAL DATABASE STATE:
             ${JSON.stringify(dbSummary, null, 2)}
 
             ${specificScholarContext ? `
-            FOCUSED SCHOLAR ANALYSIS:
+            FOCUSED SCHOLAR ANALYSIS (DETECTED FROM CONTEXT):
             - Identity: ${specificScholarContext.profile.fullName} (${specificScholarContext.profile.scholarId})
             - School: ${specificScholarContext.profile.schoolId?.name || 'Unknown'}
             - Attendance: ${specificScholarContext.attendance}%
@@ -127,23 +125,23 @@ const chatWithAI = async (req, res, next) => {
             ` : ''}
 
             OPERATIONAL GUIDELINES:
-            1. DATA INTERPRETATION: Look for correlations (e.g., does low attendance correlate with low marks?).
-            2. STRATEGIC PLANNING: Use the database state to suggest where resources should be allocated (e.g., which schools need more support?).
-            3. FINANCIAL AUDIT: If asked about money, refer to the "financials" and "sponsorship" data provided.
-            4. SMART REPORTING: Format reports in professional markdown with clear headings, bold text, and appropriate emojis.
-            5. RISK DETECTION: Proactively flag anomalies you see in the data provided.
+            1. BE CONVERSATIONAL: Remember what was said in previous messages.
+            2. DATA-DRIVEN ANSWERS: Always refer to the GLOBAL DATABASE STATE or the FOCUSED SCHOLAR ANALYSIS to provide real information.
+            3. markdown FORMATTING: Use bold, lists, and tables for readability.
+            4. PROACTIVE INSIGHTS: If the data shows a negative trend, explain why and suggest a fix.
+            5. LIMITATIONS: If a user asks for something not in the provided data state, state that you don't have that specific record yet.
 
-            If you detect a severe risk to a scholar's progression (Attendance < 50% or Marks < 40%), append "[TRIGGER_ALERT: {Scholar Name} - {Reason}]" to your reply.
+            RISK TRIGGER: If you see Attendance < 50% or Marks < 40%, append "[TRIGGER_ALERT: {Scholar Name} - {Reason}]" to your reply.
         `;
 
-        // 4. GROQ API CALL
+        // 4. GROQ API CALL WITH HISTORY
         const chatCompletion = await groq.chat.completions.create({
             messages: [
                 { role: 'system', content: systemPrompt },
-                { role: 'user', content: message }
+                ...conversation
             ],
             model: 'llama-3.3-70b-versatile',
-            temperature: 0.2, // Lower temperature for more analytical/factual responses
+            temperature: 0.4,
             max_tokens: 4000,
         });
 
@@ -154,16 +152,16 @@ const chatWithAI = async (req, res, next) => {
         if (alertMatch) {
             const alertContent = alertMatch[1];
             await NotificationService.notifyAll(`🚨 AI-DETECTED RISK: ${alertContent}`, 'warning', 'AI Analytical Engine');
-            aiReply = aiReply.replace(/\[TRIGGER_ALERT: .*?\]/, '\n\n⚠️ *System Note: An emergency risk alert has been dispatched to administrators based on this analysis.*');
+            aiReply = aiReply.replace(/\[TRIGGER_ALERT: .*?\]/, '\n\n⚠️ *Emergency risk alert dispatched to administrators.*');
         }
 
         return successResponse(res, {
             reply: aiReply,
-            context: specificScholarContext ? 'Individual Profile' : 'System-Wide Aggregate'
-        }, 'Comprehensive system-wide analysis generated.');
+            context: specificScholarContext ? 'Profile Focus' : 'System Wide'
+        }, 'Analysis synchronized.');
 
     } catch (err) {
-        console.error('AI Analytical Engine Error:', err.message);
+        console.error('AI Multi-turn Engine Error:', err.message);
         next(err);
     }
 };
