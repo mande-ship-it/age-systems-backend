@@ -8,6 +8,10 @@ const eventSchema = new mongoose.Schema({
     eventTime: { type: String }, // E.g., "10:00 AM"
     location: { type: String },
     organizer: { type: String },
+    attendees: [{
+        participantId: { type: mongoose.Schema.Types.ObjectId, refPath: 'attendees.participantType' },
+        participantType: { type: String, enum: ['Scholar', 'User'] }
+    }],
     targetedParticipants: [{ type: String }],
     status: { type: String, default: 'Pending' }, // Pending, Active, History
     completed_at: { type: Date },
