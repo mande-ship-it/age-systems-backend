@@ -39,6 +39,9 @@ const recordSession = async (req, res, next) => {
             sessionData.district = req.user.assignedDistrict;
         }
 
+        if (sessionData.month) sessionData.month = parseInt(sessionData.month);
+        if (sessionData.year) sessionData.year = parseInt(sessionData.year);
+
         const session = new AttendanceSession(sessionData);
         await session.save();
 
@@ -163,10 +166,26 @@ const getAttendanceAnalytics = async (req, res, next) => {
 const getSchoolAttendanceReport = async (req, res, next) => {
     try {
         const { schoolId } = req.params;
+        const { month, weekNumber, term, semester, year } = req.query;
+
+        const sessionMatch = { schoolId: new mongoose.Types.ObjectId(schoolId) };
+        if (month) sessionMatch.month = parseInt(month);
+        if (weekNumber) sessionMatch.weekNumber = parseInt(weekNumber);
+        if (year) sessionMatch.year = parseInt(year);
+        if (term) sessionMatch.term = term;
+        if (semester) sessionMatch.semester = semester;
+
         const report = await Attendance.aggregate([
             { $lookup: { from: 'attendancesessions', localField: 'sessionId', foreignField: '_id', as: 'session' } },
             { $unwind: "$session" },
-            { $match: { "session.schoolId": new mongoose.Types.ObjectId(schoolId) } },
+            { $match: {
+                "session.schoolId": sessionMatch.schoolId,
+                ...(month && { "session.month": sessionMatch.month }),
+                ...(weekNumber && { "session.weekNumber": sessionMatch.weekNumber }),
+                ...(year && { "session.year": sessionMatch.year }),
+                ...(term && { "session.term": sessionMatch.term }),
+                ...(semester && { "session.semester": sessionMatch.semester })
+            }},
             { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
             { $unwind: "$scholar" },
             { $match: { "scholar.status": "Active" } },
@@ -184,6 +203,21 @@ const getSchoolAttendanceReport = async (req, res, next) => {
                         { $eq: ["$total_sessions", 0] },
                         0,
                         { $round: [{ $multiply: [{ $divide: ["$present_count", "$total_sessions"] }, 100] }, 0] }
+                    ]
+                }
+            }},
+            { $addFields: {
+                status: {
+                    $cond: [
+                        { $gte: ["$attendanceRate", 85] },
+                        "On Track",
+                        {
+                            $cond: [
+                                { $gte: ["$attendanceRate", 50] },
+                                "Behind",
+                                "At Risk"
+                            ]
+                        }
                     ]
                 }
             }},
