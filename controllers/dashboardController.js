@@ -7,6 +7,8 @@ const AcademicResult = require('../models/AcademicResult');
 const Attendance = require('../models/Attendance');
 const User = require('../models/User');
 const Backup = require('../models/Backup');
+const Notification = require('../models/Notification');
+const AuditLog = require('../models/AuditLog');
 const { successResponse } = require('../utils/response');
 const mongoose = require('mongoose');
 const { applyDistrictFilter } = require('../utils/districtFilter');
@@ -219,6 +221,25 @@ const getDashboardStats = async (req, res, next) => {
             { $project: { region: "$_id", count: 1, _id: 0 } }
         ]);
 
+        // 8. Operational Log (Recent System Activities)
+        const logs = await Notification.find({
+            $or: [
+                { userId: req.user.id },
+                { userId: null }
+            ]
+        })
+        .sort({ created_at: -1 })
+        .limit(10);
+
+        const operationalLog = logs.map(l => ({
+            id: l._id,
+            title: l.type.toUpperCase(),
+            message: l.message,
+            time: l.created_at,
+            actor: l.actorName,
+            status: l.type
+        }));
+
         const stats = {
             summary: [
                 { label: 'Total Scholars', value: totalScholars, icon: 'groups' },
@@ -237,6 +258,7 @@ const getDashboardStats = async (req, res, next) => {
             performanceSeries,
             engagementSeries,
             regions,
+            operationalLog, // Added this
             pendingCount: (canApproveScholars ? (pScholarsCount + pPaymentsCount) : 0) + pEventsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
             pendingPaymentsCount: canApproveScholars ? pPaymentsCount : 0,

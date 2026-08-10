@@ -12,4 +12,13 @@ const auditLogSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
+// Static method for logging
+auditLogSchema.statics.log = async function(userId, action, details, actorName = 'System') {
+    try {
+        return await this.create({ userId, action, details, actorName });
+    } catch (err) {
+        console.error('Audit Log Error:', err);
+    }
+};
+
 module.exports = mongoose.model('AuditLog', auditLogSchema);
