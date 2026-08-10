@@ -87,9 +87,10 @@ io.on('connection', (socket) => {
 });
 
 app.use(cors({
-    origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000"],
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization"]
+    origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000", "http://localhost:5000", "http://localhost:5500", "http://localhost:8080"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
 }));
 app.use(helmet({
     contentSecurityPolicy: false,
