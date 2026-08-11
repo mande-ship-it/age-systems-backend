@@ -158,12 +158,17 @@ const updateScholar = async (req, res, next) => {
         const { id } = req.params;
         if (!mongoose.Types.ObjectId.isValid(id)) return errorResponse(res, 'Invalid Scholar ID.', 400);
 
-        // Sanitize body to remove ID fields that shouldn't be updated directly
+        // Handle name mapping for frontend compatibility
         const updateData = { ...req.body };
-        delete updateData._id;
-        delete updateData.id;
-        delete updateData.scholarId;
-        delete updateData.scholar_id;
+        if (updateData.name && !updateData.fullName) {
+            updateData.fullName = updateData.name;
+        }
+
+        // Progression fields (New Spec)
+        if (updateData.registeredClass !== undefined) updateData.registeredClass = updateData.registeredClass;
+        if (updateData.programDurationYears !== undefined) updateData.programDurationYears = updateData.programDurationYears;
+        if (updateData.yearsCompleted !== undefined) updateData.yearsCompleted = updateData.yearsCompleted;
+        if (updateData.flag !== undefined) updateData.flag = updateData.flag;
 
         const updatedScholar = await Scholar.findByIdAndUpdate(id, updateData, { new: true });
         
