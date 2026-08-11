@@ -19,26 +19,21 @@ const getDashboardStats = async (req, res, next) => {
         const baseFilter = applyDistrictFilter(req);
 
         // 1. Unified Summary Counts
-        const [totalScholars, activeScholars, graduatedScholars, uniActive, secActive, totalSponsors, totalUsers, totalSchools, backupCount] = await Promise.all([
-            Scholar.countDocuments(baseFilter),
-            Scholar.countDocuments({ ...baseFilter, status: 'Active' }),
-            Scholar.countDocuments({ ...baseFilter, status: { $in: ['Graduated', 'Alumni'] } }),
-            Scholar.countDocuments({ ...baseFilter, status: 'Active', schoolType: 'University' }),
-            Scholar.countDocuments({ ...baseFilter, status: 'Active', schoolType: 'Secondary' }),
+        const levelFilter = { ...baseFilter, schoolType: level };
+
+        const [totalInLevel, activeInLevel, graduatedInLevel, totalSponsors, totalUsers, totalSchools, backupCount] = await Promise.all([
+            Scholar.countDocuments(levelFilter),
+            Scholar.countDocuments({ ...levelFilter, status: 'Active' }),
+            Scholar.countDocuments({ ...levelFilter, status: { $in: ['Graduated', 'Alumni'] } }),
             Sponsor.countDocuments(),
             User.countDocuments(),
-            School.countDocuments(baseFilter), // Schools also have district
+            School.countDocuments({ ...baseFilter, level: level === 'University' ? { $regex: /tertiary|university|college/i } : { $regex: /secondary|high|primary/i } }),
             Backup.countDocuments()
         ]);
 
-        // 2. Retention Analytics
-        const retentionFilter = { ...baseFilter, schoolType: level };
-        if (schoolId && mongoose.Types.ObjectId.isValid(schoolId)) {
-            retentionFilter.schoolId = new mongoose.Types.ObjectId(schoolId);
-        }
-
+        // Calculate Retention specifically for the level
         const retentionStats = await Scholar.aggregate([
-            { $match: retentionFilter },
+            { $match: levelFilter },
             { $group: {
                 _id: null,
                 total: { $sum: 1 },
@@ -52,7 +47,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 3. Cohort Distribution (last 4 active cohorts)
         const cohortDistribution = await Scholar.aggregate([
-            { $match: { ...baseFilter, schoolType: level, status: 'Active', startYear: { $ne: null } } },
+            { $match: { ...levelFilter, status: 'Active', startYear: { $ne: null } } },
             { $group: { _id: "$startYear", count: { $sum: 1 } } },
             { $sort: { _id: -1 } },
             { $limit: 4 },
@@ -60,7 +55,7 @@ const getDashboardStats = async (req, res, next) => {
         ]);
 
         // 4. Institutional Performance Trends
-        const trendsMatch = { ...baseFilter, schoolType: level, status: 'Active' };
+        const trendsMatch = { ...levelFilter, status: 'Active' };
         if (schoolId && mongoose.Types.ObjectId.isValid(schoolId)) {
             trendsMatch.schoolId = new mongoose.Types.ObjectId(schoolId);
         }
@@ -89,7 +84,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 5. Pending Total & Summary
         const [pendingScholars, pendingEvents] = await Promise.all([
-            Scholar.find({ ...baseFilter, status: 'Pending' }).limit(5),
+            Scholar.find({ ...levelFilter, status: 'Pending' }).limit(5),
             Event.find({ status: 'Pending' }).limit(5)
         ]);
 
@@ -115,11 +110,11 @@ const getDashboardStats = async (req, res, next) => {
         // Sort approvals by time descending
         approvalsSummary.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-        const pScholarsCount = await Scholar.countDocuments({ ...baseFilter, status: 'Pending' });
+        const pScholarsCount = await Scholar.countDocuments({ ...levelFilter, status: 'Pending' });
         const pEventsCount = await Event.countDocuments({ status: 'Pending' });
 
         const riskStats = await Scholar.aggregate([
-            { $match: { ...baseFilter, schoolType: level, status: 'Active' } },
+            { $match: { ...levelFilter, status: 'Active' } },
             { $lookup: {
                 from: 'academicresults',
                 localField: '_id',
@@ -205,7 +200,7 @@ const getDashboardStats = async (req, res, next) => {
 
         // 7. Regional Distribution (Active scholars only)
         const regions = await Scholar.aggregate([
-            { $match: { ...baseFilter, status: 'Active', district: { $ne: null } } },
+            { $match: { ...levelFilter, status: 'Active', district: { $ne: null } } },
             { $group: { _id: "$district", count: { $sum: 1 } } },
             { $sort: { count: -1 } },
             { $limit: 5 },
@@ -233,11 +228,10 @@ const getDashboardStats = async (req, res, next) => {
 
         const stats = {
             summary: [
-                { label: 'Total Scholars', value: totalScholars, icon: 'groups' },
-                { label: 'Active Scholars', value: activeScholars, icon: 'check_circle' },
-                { label: 'Graduated', value: graduatedScholars, icon: 'award' },
-                { label: 'University', value: uniActive, icon: 'bank' },
-                { label: 'Secondary', value: secActive, icon: 'book' },
+                { label: `Total ${level}s`, value: totalInLevel, icon: 'groups' },
+                { label: 'Active Scholars', value: activeInLevel, icon: 'check_circle' },
+                { label: 'Graduated', value: graduatedInLevel, icon: 'award' },
+                { label: 'Schools', value: totalSchools, icon: 'bank' },
                 { label: 'Retention', value: `${retentionRate}%`, icon: 'trend', footnote: `${currentRetained} of ${initialTotal}` }
             ],
             system: {
@@ -249,7 +243,7 @@ const getDashboardStats = async (req, res, next) => {
             performanceSeries,
             engagementSeries,
             regions,
-            operationalLog, // Added this
+            operationalLog,
             pendingCount: (canApproveScholars ? pScholarsCount : 0) + pEventsCount,
             pendingScholarsCount: canApproveScholars ? pScholarsCount : 0,
             approvals: approvalsSummary,
