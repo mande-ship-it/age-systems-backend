@@ -140,5 +140,19 @@ connectDB().then(() => {
         console.log('Scholar Management System Backend API Server');
         console.log(`Server running on http://localhost:${PORT}`);
         console.log('--------------------------------------------------');
+
+        // Keep-Alive / Anti-Sleep Workaround for Render Free Tier
+        const https = require('https');
+        const RELOAD_URL = 'https://scholar-management-system.onrender.com';
+
+        setInterval(() => {
+            https.get(RELOAD_URL, (res) => {
+                if (res.statusCode === 200) {
+                    console.log('Reload successful: Service kept alive.');
+                }
+            }).on('error', (err) => {
+                console.error('Error during keep-alive ping:', err.message);
+            });
+        }, 14 * 60 * 1000); // Ping every 14 minutes to stay within the 15-minute timeout
     });
 });
