@@ -6,174 +6,125 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const mongoose = require('mongoose');
 const connectDB = require('./config/database');
 
-// Import routes
-const authRoutes = require('./routes/authRoutes');
-const scholarRoutes = require('./routes/scholarRoutes');
-const attendanceRoutes = require('./routes/attendanceRoutes');
-const academicRoutes = require('./routes/academicRoutes');
-const schoolRoutes = require('./routes/schoolRoutes');
-const sponsorRoutes = require('./routes/sponsorRoutes');
-const dashboardRoutes = require('./routes/dashboardRoutes');
-const reportRoutes = require('./routes/reportRoutes');
-const settingsRoutes = require('./routes/settingsRoutes');
-const userRoutes = require('./routes/userRoutes');
-const roleRoutes = require('./routes/roleRoutes');
-const eventRoutes = require('./routes/eventRoutes');
-const notificationRoutes = require('./routes/notificationRoutes');
-const approvalRoutes = require('./routes/approvalRoutes');
-const aiRoutes = require('./routes/aiRoutes');
-const internshipRoutes = require('./routes/internshipRoutes');
-const departmentRoutes = require('./routes/departmentRoutes');
-const performanceRoutes = require('./routes/performanceRoutes');
-const meetingRoutes = require('./routes/meetingRoutes');
-
-// Import schedulers
-const { initSchedulers } = require('./utils/scheduler');
-
-// Import error handler middleware
-const errorHandler = require('./middleware/errorHandler');
-
 const app = express();
-app.set('etag', false);
-const path = require('path');
 const server = http.createServer(app);
 
-// Dynamic CORS Origin
+// Production URLs
+const BACKEND_URL = 'https://scholar-management-api.onrender.com';
+const FRONTEND_URL = 'https://scholar-management-system.onrender.com';
+
+// 1. Unified CORS Configuration
 const allowedOrigins = [
-    "https://scholar-management-api.onrender.com",
-    "https://scholar-management-system.onrender.com",
+    BACKEND_URL,
+    FRONTEND_URL,
     "http://localhost:3000",
     "http://localhost:5000",
-    "http://localhost:5500",
     "http://localhost:8080",
-    "http://localhost:57511" // Common Flutter debug port
+    "http://localhost:57511" // Flutter default debug port
 ];
 
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps) or allowed origins
+        if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost')) {
+            callback(null, true);
+        } else {
+            console.log('❌ CORS Blocked:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+}));
+
+// 2. Socket.io setup with CORS
 const io = new Server(server, {
     cors: {
         origin: allowedOrigins,
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+        methods: ["GET", "POST"],
         credentials: true
     },
     allowEIO3: true,
     transports: ['websocket', 'polling']
 });
 
-const PORT = process.env.PORT || 5000;
-
 global.io = io;
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
-
     socket.on('join', (userId) => {
         socket.join(`user_${userId}`);
-        console.log(`User ${userId} joined their notification room.`);
     });
-
-    socket.on('join_meeting', (meetingId) => {
-        socket.join(`meeting_${meetingId}`);
-        console.log(`User joined meeting room: meeting_${meetingId}`);
-    });
-
-    socket.on('meeting_message', (data) => {
-        io.to(`meeting_${data.meetingId}`).emit('new_meeting_message', data);
-    });
-
-    socket.on('initiate_call', (data) => {
-        const { participants, meetingId } = data;
-        if (participants && Array.isArray(participants)) {
-            participants.forEach(userId => {
-                io.to(`user_${userId}`).emit('incoming_call', data);
-            });
-        }
-    });
-
     socket.on('disconnect', () => {
         console.log('Client disconnected');
     });
 });
 
-app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost')) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true
-}));
-
-app.use(helmet({
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+// 3. Global Middleware
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use('/assets', express.static(path.join(__dirname, 'assets')));
+// Static Files
+app.use('/uploads', express.static('uploads'));
+app.use('/assets', express.static('assets'));
 
+// 4. API Endpoints
 app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
-        message: 'Scholar Management System Backend API',
-        version: '1.0.0',
-        environment: process.env.NODE_ENV || 'development'
+        message: 'Scholar Management System API',
+        status: 'Online',
+        db: mongoose.connection.readyState === 1 ? 'connected' : 'connecting'
     });
 });
 
-app.use('/api/auth', authRoutes);
-app.use('/api/scholars', scholarRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/academic', academicRoutes);
-app.use('/api/schools', schoolRoutes);
-app.use('/api/sponsors', sponsorRoutes);
-app.use('/api/dashboard', dashboardRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/roles', roleRoutes);
-app.use('/api/events', eventRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/approvals', approvalRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/internships', internshipRoutes);
-app.use('/api/departments', departmentRoutes);
-app.use('/api/performance', performanceRoutes);
-app.use('/api/meetings', meetingRoutes);
+// Health check for Render
+app.get('/api/health', (req, res) => {
+    res.status(200).json({
+        status: 'UP',
+        db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+    });
+});
 
-app.use(errorHandler);
+// Mount Routes
+app.use('/api/auth', require('./routes/authRoutes'));
+app.use('/api/scholars', require('./routes/scholarRoutes'));
+app.use('/api/attendance', require('./routes/attendanceRoutes'));
+app.use('/api/academic', require('./routes/academicRoutes'));
+app.use('/api/schools', require('./routes/schoolRoutes'));
+app.use('/api/sponsors', require('./routes/sponsorRoutes'));
+app.use('/api/dashboard', require('./routes/dashboardRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
+app.use('/api/ai', require('./routes/aiRoutes'));
+app.use('/api/internships', require('./routes/internshipRoutes'));
 
-// Connect to MongoDB then start server
+// 5. Error Handler
+app.use(require('./middleware/errorHandler'));
+
+// 6. Connect Database & Start Server
+const PORT = process.env.PORT || 5000;
+
 connectDB().then(() => {
     server.listen(PORT, '0.0.0.0', () => {
-        initSchedulers();
-        console.log('--------------------------------------------------');
-        console.log('Scholar Management System Backend API Server');
-        console.log(`Server running on port ${PORT}`);
-        console.log('--------------------------------------------------');
+        console.log(`✅ Server live on port ${PORT}`);
 
-        // Keep-Alive / Anti-Sleep Workaround for Render Free Tier
+        // --- KEEP-ALIVE WORKAROUND ---
+        // Pings itself every 14 minutes to prevent Render sleep mode
         const https = require('https');
-        const RELOAD_URL = 'https://scholar-management-api.onrender.com';
-
         setInterval(() => {
-            https.get(RELOAD_URL, (res) => {
+            https.get(BACKEND_URL, (res) => {
                 if (res.statusCode === 200) {
-                    console.log('💓 Heartbeat: Service kept alive.');
+                    console.log('💓 Heartbeat: Production Pulse Check Successful');
                 }
             }).on('error', (err) => {
-                console.error('💓 Heartbeat: Ping failed:', err.message);
+                console.error('💓 Heartbeat Error:', err.message);
             });
-        }, 14 * 60 * 1000); // Ping every 14 minutes
+        }, 14 * 60 * 1000);
     });
 });
