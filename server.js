@@ -39,15 +39,28 @@ const app = express();
 app.set('etag', false);
 const path = require('path');
 const server = http.createServer(app);
+
+// Dynamic CORS Origin
+const allowedOrigins = [
+    "https://scholar-management-api.onrender.com",
+    "https://scholar-management-system.onrender.com",
+    "http://localhost:3000",
+    "http://localhost:5000",
+    "http://localhost:5500",
+    "http://localhost:8080",
+    "http://localhost:57511" // Common Flutter debug port
+];
+
 const io = new Server(server, {
     cors: {
-        origin: ["https://scholar-management-api.onrender.com", "http://localhost:3000"],
-        methods: ["GET", "POST", "PUT", "DELETE"],
+        origin: allowedOrigins,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
         credentials: true
     },
     allowEIO3: true,
     transports: ['websocket', 'polling']
 });
+
 const PORT = process.env.PORT || 5000;
 
 global.io = io;
@@ -66,12 +79,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on('meeting_message', (data) => {
-        // Broadcast to everyone in the meeting room
         io.to(`meeting_${data.meetingId}`).emit('new_meeting_message', data);
     });
 
     socket.on('initiate_call', (data) => {
-        // data contains: meetingId, participants (array of user IDs), callerName, isVideo
         const { participants, meetingId } = data;
         if (participants && Array.isArray(participants)) {
             participants.forEach(userId => {
@@ -86,11 +97,20 @@ io.on('connection', (socket) => {
 });
 
 app.use(cors({
-    origin: ["https://scholar-management-api.onrender.com", "http://localhost:3000", "http://localhost:5000", "http://localhost:5500", "http://localhost:8080"],
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost')) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true
 }));
+
 app.use(helmet({
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -106,7 +126,8 @@ app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
         message: 'Scholar Management System Backend API',
-        version: '1.0.0'
+        version: '1.0.0',
+        environment: process.env.NODE_ENV || 'development'
     });
 });
 
@@ -138,7 +159,7 @@ connectDB().then(() => {
         initSchedulers();
         console.log('--------------------------------------------------');
         console.log('Scholar Management System Backend API Server');
-        console.log(`Server running on http://localhost:${PORT}`);
+        console.log(`Server running on port ${PORT}`);
         console.log('--------------------------------------------------');
 
         // Keep-Alive / Anti-Sleep Workaround for Render Free Tier
