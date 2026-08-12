@@ -41,7 +41,7 @@ const path = require('path');
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000"],
+        origin: ["https://scholar-management-api.onrender.com", "http://localhost:3000"],
         methods: ["GET", "POST", "PUT", "DELETE"],
         credentials: true
     },
@@ -86,7 +86,7 @@ io.on('connection', (socket) => {
 });
 
 app.use(cors({
-    origin: ["https://scholar-management-system.onrender.com", "http://localhost:3000", "http://localhost:5000", "http://localhost:5500", "http://localhost:8080"],
+    origin: ["https://scholar-management-api.onrender.com", "http://localhost:3000", "http://localhost:5000", "http://localhost:5500", "http://localhost:8080"],
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true
@@ -143,16 +143,16 @@ connectDB().then(() => {
 
         // Keep-Alive / Anti-Sleep Workaround for Render Free Tier
         const https = require('https');
-        const RELOAD_URL = 'https://scholar-management-system.onrender.com';
+        const RELOAD_URL = 'https://scholar-management-api.onrender.com';
 
         setInterval(() => {
             https.get(RELOAD_URL, (res) => {
                 if (res.statusCode === 200) {
-                    console.log('Reload successful: Service kept alive.');
+                    console.log('💓 Heartbeat: Service kept alive.');
                 }
             }).on('error', (err) => {
-                console.error('Error during keep-alive ping:', err.message);
+                console.error('💓 Heartbeat: Ping failed:', err.message);
             });
-        }, 14 * 60 * 1000); // Ping every 14 minutes to stay within the 15-minute timeout
+        }, 14 * 60 * 1000); // Ping every 14 minutes
     });
 });
