@@ -16,65 +16,56 @@ const server = http.createServer(app);
 const BACKEND_URL = 'https://scholar-management-api.onrender.com';
 const FRONTEND_URL = 'https://scholar-management-system.onrender.com';
 
-// 1. Unified CORS Configuration
 const allowedOrigins = [
     BACKEND_URL,
     FRONTEND_URL,
     "http://localhost:3000",
     "http://localhost:5000",
     "http://localhost:8080",
-    "http://localhost:57511" // Flutter default debug port
+    "http://localhost:57511"
 ];
 
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps) or allowed origins
         if (!origin || allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost')) {
             callback(null, true);
         } else {
-            console.log('❌ CORS Blocked:', origin);
+            console.log('CORS Blocked for origin:', origin);
             callback(new Error('Not allowed by CORS'));
         }
     },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+    credentials: true
 }));
 
-// 2. Socket.io setup with CORS
 const io = new Server(server, {
     cors: {
         origin: allowedOrigins,
-        methods: ["GET", "POST"],
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
         credentials: true
     },
     allowEIO3: true,
     transports: ['websocket', 'polling']
 });
 
+const PORT = process.env.PORT || 5000;
 global.io = io;
 
 io.on('connection', (socket) => {
-    console.log('New client connected:', socket.id);
     socket.on('join', (userId) => {
         socket.join(`user_${userId}`);
     });
-    socket.on('disconnect', () => {
-        console.log('Client disconnected');
-    });
+    socket.on('disconnect', () => {});
 });
 
-// 3. Global Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static Files
 app.use('/uploads', express.static('uploads'));
 app.use('/assets', express.static('assets'));
 
-// 4. API Endpoints
+// Root route
 app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
@@ -84,12 +75,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// Health check for Render
 app.get('/api/health', (req, res) => {
-    res.status(200).json({
-        status: 'UP',
-        db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
-    });
+    res.status(200).json({ status: 'UP', db: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected' });
 });
 
 // Mount Routes
@@ -103,28 +90,25 @@ app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/ai', require('./routes/aiRoutes'));
 app.use('/api/internships', require('./routes/internshipRoutes'));
+app.use('/api/performance', require('./routes/performanceRoutes'));
+app.use('/api/meetings', require('./routes/meetingRoutes'));
 
-// 5. Error Handler
 app.use(require('./middleware/errorHandler'));
 
-// 6. Connect Database & Start Server
-const PORT = process.env.PORT || 5000;
+// Catch-all for 404
+app.use('*', (req, res) => {
+    res.status(404).json({ success: false, message: 'Route not found on this server.' });
+});
 
 connectDB().then(() => {
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`✅ Server live on port ${PORT}`);
+        console.log(`✅ Production Server running on port ${PORT}`);
 
-        // --- KEEP-ALIVE WORKAROUND ---
-        // Pings itself every 14 minutes to prevent Render sleep mode
         const https = require('https');
         setInterval(() => {
             https.get(BACKEND_URL, (res) => {
-                if (res.statusCode === 200) {
-                    console.log('💓 Heartbeat: Production Pulse Check Successful');
-                }
-            }).on('error', (err) => {
-                console.error('💓 Heartbeat Error:', err.message);
-            });
+                if (res.statusCode === 200) console.log('💓 Heartbeat: SUCCESS');
+            }).on('error', (e) => console.error('💓 Heartbeat: FAIL', e.message));
         }, 14 * 60 * 1000);
     });
 });
