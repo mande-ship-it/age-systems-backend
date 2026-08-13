@@ -96,7 +96,7 @@ app.use('/api/meetings', require('./routes/meetingRoutes'));
 app.use(require('./middleware/errorHandler'));
 
 // Catch-all for 404
-app.use('*', (req, res) => {
+app.use((req, res) => {
     res.status(404).json({ success: false, message: 'Route not found on this server.' });
 });
 
