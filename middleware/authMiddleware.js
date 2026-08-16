@@ -15,14 +15,7 @@ const authMiddleware = (req, res, next) => {
         return next();
     }
 
-    // Set a dummy user so routes that expect req.user don't crash
-    req.user = {
-        id: 1,
-        email: 'admin@ageafrica.org',
-        role: 'Administrator',
-        fullName: 'System Administrator'
-    };
-    next();
+    return errorResponse(res, 'Access denied. No token provided.', 401);
 };
 
 module.exports = authMiddleware;

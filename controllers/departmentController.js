@@ -54,13 +54,22 @@ const getDepartmentUsers = async (req, res, next) => {
 const createDepartment = async (req, res, next) => {
     try {
         const { name, description, code, defaultDashboard } = req.body;
+        console.log('🏢 Attempting to create department:', { name, code });
+
+        const existing = await Department.findOne({ $or: [{ name }, { code }] });
+        if (existing) {
+            return errorResponse(res, 'Department with this name or code already exists.', 400);
+        }
+
         const newDept = new Department({ name, description, code, defaultDashboard });
         await newDept.save();
+        console.log('✅ Department created successfully:', newDept._id);
 
         await NotificationService.notifyAll(`🏢 New Department created: ${name}`, 'info', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, newDept, 'Department created successfully.', 201);
     } catch (err) {
+        console.error('❌ createDepartment error:', err);
         next(err);
     }
 };

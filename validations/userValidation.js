@@ -29,13 +29,13 @@ const createUserRules = [
         .isEmail()
         .withMessage('Valid email required'),
     body('password')
-        .optional()
+        .optional({ checkFalsy: true })
         .isLength({ min: 6 })
         .withMessage('Password must be at least 6 characters if provided'),
-    body('roleName')
-        .if(body('role_name').not().exists())
+    body('roleId')
+        .if(body('roleName').not().exists())
         .notEmpty()
-        .withMessage('Role is required (as roleName or role_name)')
+        .withMessage('Role is required (select a role or provide roleName)')
 ];
 
 module.exports = {

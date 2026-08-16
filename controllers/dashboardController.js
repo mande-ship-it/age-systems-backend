@@ -14,12 +14,24 @@ const { applyDistrictFilter } = require('../utils/districtFilter');
 
 const getDashboardStats = async (req, res, next) => {
     try {
-        const { level = 'University', schoolId } = req.query;
+        const { level = 'Secondary', schoolId } = req.query;
 
         const baseFilter = applyDistrictFilter(req);
 
-        // 1. Unified Summary Counts
-        const levelFilter = { ...baseFilter, schoolType: level };
+        // Robust case-insensitive district matching
+        if (baseFilter.district) {
+            const cleanDistrict = baseFilter.district.toString().trim();
+            baseFilter.district = new RegExp(cleanDistrict, 'i'); // Fuzzy match
+        }
+
+        // Use fuzzy match for schoolType as well
+        const typeRegex = new RegExp(`^${level}$`, 'i');
+        const levelFilter = { ...baseFilter, schoolType: typeRegex };
+
+        console.log(`[DASHBOARD DEBUG] User: ${req.user.fullName} | Role: ${req.user.role} | District: ${req.user.assignedDistrict}`);
+        console.log(`[DASHBOARD DEBUG] Level Filter:`, JSON.stringify(levelFilter));
+
+        const isFieldOfficer = (req.user?.role || '').toLowerCase().includes('field');
 
         const [totalInLevel, activeInLevel, graduatedInLevel, totalSponsors, totalUsers, totalSchools, backupCount] = await Promise.all([
             Scholar.countDocuments(levelFilter),
@@ -30,6 +42,8 @@ const getDashboardStats = async (req, res, next) => {
             School.countDocuments({ ...baseFilter, level: level === 'University' ? { $regex: /tertiary|university|college/i } : { $regex: /secondary|high|primary/i } }),
             Backup.countDocuments()
         ]);
+
+        console.log(`[DASHBOARD DEBUG] Counts -> Total: ${totalInLevel}, Active: ${activeInLevel}`);
 
         // Calculate Retention specifically for the level
         const retentionStats = await Scholar.aggregate([
@@ -45,14 +59,38 @@ const getDashboardStats = async (req, res, next) => {
         const currentRetained = retentionStats[0]?.retained || 0;
         const retentionRate = initialTotal > 0 ? ((currentRetained / initialTotal) * 100).toFixed(1) : 100;
 
-        // 3. Cohort Distribution (last 4 active cohorts)
+        // 3. Cohort Distribution (last 6 active cohorts)
         const cohortDistribution = await Scholar.aggregate([
-            { $match: { ...levelFilter, status: 'Active', startYear: { $ne: null } } },
-            { $group: { _id: "$startYear", count: { $sum: 1 } } },
+            { $match: {
+                ...levelFilter,
+                status: isFieldOfficer ? { $in: ['Active', 'Pending'] } : 'Active'
+            } },
+            { $addFields: {
+                // Priority: startYear -> start_year -> first year in progression history -> creation year
+                resolvedCohort: {
+                    $ifNull: [
+                        "$startYear",
+                        { $ifNull: [
+                            "$start_year",
+                            { $ifNull: [
+                                { $arrayElemAt: ["$progressionHistory.year", 0] },
+                                { $toString: { $year: "$created_at" } }
+                            ]}
+                        ]}
+                    ]
+                }
+            }},
+            { $addFields: {
+                cohortYear: { $trim: { input: { $toString: "$resolvedCohort" } } }
+            }},
+            { $group: { _id: "$cohortYear", count: { $sum: 1 } } },
+            { $match: { _id: { $nin: [null, "", "undefined", "null", "NaN"] } }},
             { $sort: { _id: -1 } },
-            { $limit: 4 },
+            { $limit: 6 },
             { $project: { cohort: "$_id", count: 1, _id: 0 } }
         ]);
+
+        console.log(`[DASHBOARD DEBUG] Cohort Data:`, JSON.stringify(cohortDistribution));
 
         // 4. Institutional Performance Trends
         const trendsMatch = { ...levelFilter, status: 'Active' };
@@ -122,18 +160,22 @@ const getDashboardStats = async (req, res, next) => {
                 as: 'results'
             }},
             { $addFields: {
-                avgMark: { $avg: "$results.marks" }
+                // Only count scholars who have at least one mark
+                validResults: { $filter: { input: "$results", as: "r", cond: { $ne: ["$$r.marks", null] } } }
+            }},
+            { $addFields: {
+                avgMark: { $avg: "$validResults.marks" }
             }},
             { $group: {
                 _id: "$schoolName",
                 avg: { $avg: "$avgMark" },
-                atrisk: { $sum: { $cond: [{ $lt: ["$avgMark", 50] }, 1, 0] } },
+                atrisk: { $sum: { $cond: [{ $and: [{ $ne: ["$avgMark", null] }, { $lt: ["$avgMark", 50] }] }, 1, 0] } },
                 total: { $sum: 1 },
-                passed: { $sum: { $cond: [{ $gte: ["$avgMark", 50] }, 1, 0] } }
+                passed: { $sum: { $cond: [{ $and: [{ $ne: ["$avgMark", null] }, { $gte: ["$avgMark", 50] }] }, 1, 0] } }
             }},
             { $project: {
                 name: "$_id",
-                avg: { $round: ["$avg", 1] },
+                avg: { $round: [{ $ifNull: ["$avg", 0] }, 1] },
                 atrisk: 1,
                 pass_rate: {
                     $round: [
@@ -158,44 +200,69 @@ const getDashboardStats = async (req, res, next) => {
                 : (r.level === 'medium' ? `Moderate Risk: ${r.pass_rate}% pass rate. Flags on scholar marks.` : `High Alert: ${r.pass_rate}% pass rate. Multi-factor performance decline.`)
         }));
 
-        // 6. Engagement vs Performance Impact (Active scholars only)
-        const engagementTrends = await Attendance.aggregate([
-            { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
-            { $unwind: "$scholar" },
+        // 6. Engagement vs Performance Impact
+        const engagementTrends = await Scholar.aggregate([
             { $match: {
-                "scholar.status": "Active",
-                "scholar.schoolType": level,
-                ...(baseFilter.district ? { "scholar.district": baseFilter.district } : {})
+                ...levelFilter,
+                status: isFieldOfficer ? { $in: ['Active', 'Pending'] } : 'Active'
             } },
-            { $group: {
-                _id: "$scholarId",
-                presentCount: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
-                totalCount: { $sum: 1 }
+            // Get attendance summary for each scholar
+            { $lookup: {
+                from: 'attendances',
+                localField: '_id',
+                foreignField: 'scholarId',
+                as: 'attendanceLogs'
             }},
             { $addFields: {
-                rate: { $multiply: [{ $divide: ["$presentCount", { $cond: [{ $eq: ["$totalCount", 0] }, 1, "$totalCount"] }] }, 100] }
+                totalAtt: { $size: "$attendanceLogs" },
+                presentAtt: {
+                    $size: {
+                        $filter: {
+                            input: "$attendanceLogs",
+                            as: "log",
+                            cond: { $eq: ["$$log.status", "present"] }
+                        }
+                    }
+                }
+            }},
+            { $addFields: {
+                attRate: {
+                    $cond: [
+                        { $eq: ["$totalAtt", 0] },
+                        0,
+                        { $multiply: [{ $divide: ["$presentAtt", "$totalAtt"] }, 100] }
+                    ]
+                }
             }},
             { $addFields: {
                 group: {
                     $cond: [
-                        { $gte: ["$rate", 80] }, "Frequent",
-                        { $cond: [{ $gte: ["$rate", 50] }, "Moderate", "Rare"] }
+                        { $gte: ["$attRate", 80] }, "Frequent",
+                        { $cond: [{ $gte: ["$attRate", 50] }, "Moderate", "Rare"] }
                     ]
                 }
             }},
-            { $lookup: { from: 'academicresults', localField: '_id', foreignField: 'scholarId', as: 'results' } },
+            // Join with academic results
+            { $lookup: {
+                from: 'academicresults',
+                localField: '_id',
+                foreignField: 'scholarId',
+                as: 'results'
+            }},
             { $unwind: "$results" },
             { $group: {
                 _id: { group: "$group", year: "$results.year" },
-                avgScore: { $avg: "$results.marks" }
+                avgScore: { $avg: "$results.marks" },
+                scholarCount: { $addToSet: "$_id" }
             }},
             { $sort: { "_id.year": 1 } }
         ]);
 
         const engagementSeries = {};
         engagementTrends.forEach(t => {
-            if (!engagementSeries[t._id.group]) engagementSeries[t._id.group] = [];
-            engagementSeries[t._id.group].push({ year: t._id.year, score: t.avgScore.toFixed(1) });
+            const grp = t._id.group;
+            if (!engagementSeries[grp]) engagementSeries[grp] = [];
+            engagementSeries[grp].push({ year: t._id.year, score: t.avgScore.toFixed(1) });
         });
 
         // 7. Regional Distribution (Active scholars only)

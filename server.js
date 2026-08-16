@@ -13,7 +13,7 @@ const app = express();
 const server = http.createServer(app);
 
 // Production URLs
-const BACKEND_URL = 'https://scholar-management-api.onrender.com';
+const BACKEND_URL = 'https://age-systems-backend.onrender.com';
 const FRONTEND_URL = 'https://scholar-management-system.onrender.com';
 
 const allowedOrigins = [
@@ -92,6 +92,12 @@ app.use('/api/ai', require('./routes/aiRoutes'));
 app.use('/api/internships', require('./routes/internshipRoutes'));
 app.use('/api/performance', require('./routes/performanceRoutes'));
 app.use('/api/meetings', require('./routes/meetingRoutes'));
+app.use('/api/settings', require('./routes/settingsRoutes'));
+app.use('/api/users', require('./routes/userRoutes'));
+app.use('/api/roles', require('./routes/roleRoutes'));
+app.use('/api/events', require('./routes/eventRoutes'));
+app.use('/api/approvals', require('./routes/approvalRoutes'));
+app.use('/api/departments', require('./routes/departmentRoutes'));
 
 app.use(require('./middleware/errorHandler'));
 
@@ -104,11 +110,13 @@ connectDB().then(() => {
     server.listen(PORT, '0.0.0.0', () => {
         console.log(`✅ Production Server running on port ${PORT}`);
 
-        const https = require('https');
-        setInterval(() => {
-            https.get(BACKEND_URL, (res) => {
-                if (res.statusCode === 200) console.log('💓 Heartbeat: SUCCESS');
-            }).on('error', (e) => console.error('💓 Heartbeat: FAIL', e.message));
-        }, 14 * 60 * 1000);
+        if (process.env.NODE_ENV === 'production') {
+            const https = require('https');
+            setInterval(() => {
+                https.get(BACKEND_URL, (res) => {
+                    if (res.statusCode === 200) console.log('💓 Heartbeat: SUCCESS');
+                }).on('error', (e) => console.error('💓 Heartbeat: FAIL', e.message));
+            }, 14 * 60 * 1000);
+        }
     });
 });

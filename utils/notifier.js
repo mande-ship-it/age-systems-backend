@@ -18,34 +18,26 @@ console.log("✅ EMAIL SERVICE READY (Brevo)");
  * HELPER: SEND EMAIL VIA BREVO
  */
 const sendEmail = async ({ to, subject, html }) => {
+    console.log(`📧 Attempting to send email to: ${to} | Subject: ${subject}`);
     const sendSmtpEmail = new SibApiV3Sdk.SendSmtpEmail();
 
-    // Ensure we use verified sender from .env
     const senderEmail = process.env.EMAIL_FROM || "mande@ageafrica.org";
     const senderName = process.env.SENDER_NAME || "AGE Africa SMS";
 
-    sendSmtpEmail.sender = {
-        name: senderName,
-        email: senderEmail,
-    };
+    sendSmtpEmail.sender = { name: senderName, email: senderEmail };
     sendSmtpEmail.to = [{ email: to }];
     sendSmtpEmail.subject = subject;
     sendSmtpEmail.htmlContent = html;
 
     try {
         const result = await transactionalApi.sendTransacEmail(sendSmtpEmail);
-        console.log(`✅ Email sent to ${to}:`, result.messageId);
+        console.log(`✅ Email SUCCESS: Sent to ${to}. MessageId: ${result.messageId}`);
         return result;
     } catch (error) {
-        console.error(`❌ Email error for ${to}:`, error.message);
-        // If it's a 401, the API key is likely invalid
-        if (error.status === 401) {
-            console.error("   Reason: Brevo API Key is invalid or expired.");
-        }
-        // If it's a 403, the sender might not be verified
-        if (error.status === 403) {
-            console.error(`   Reason: Sender email [${senderEmail}] is not verified in Brevo.`);
-        }
+        console.error(`❌ Email CRITICAL FAILURE for ${to}:`, error.message);
+        if (error.status === 401) console.error("   Reason: Invalid Brevo API Key.");
+        if (error.status === 403) console.error(`   Reason: Sender [${senderEmail}] is not verified in your Brevo account.`);
+        if (error.status === 402) console.error("   Reason: Brevo account quota exceeded.");
         throw error;
     }
 };

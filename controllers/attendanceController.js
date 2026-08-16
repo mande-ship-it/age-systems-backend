@@ -19,6 +19,24 @@ const recordSession = async (req, res, next) => {
             delete sessionData.week_number;
         }
 
+        const month = parseInt(sessionData.month);
+        const year = parseInt(sessionData.year);
+        const weekNumber = parseInt(sessionData.weekNumber);
+
+        // --- NEW VALIDATION: Once per week check ---
+        const existingSession = await AttendanceSession.findOne({
+            schoolId: sessionData.schoolId,
+            type: sessionData.type,
+            year,
+            month,
+            weekNumber
+        });
+
+        if (existingSession) {
+            return errorResponse(res, `Attendance for ${sessionData.type} has already been recorded for Week ${weekNumber} of ${year}. Multiple entries per week are not permitted.`, 400);
+        }
+        // ------------------------------------------
+
         const userRole = (req.user?.role || '').toLowerCase();
         const isFieldOfficer = userRole.includes('field');
 
@@ -41,6 +59,7 @@ const recordSession = async (req, res, next) => {
 
         if (sessionData.month) sessionData.month = parseInt(sessionData.month);
         if (sessionData.year) sessionData.year = parseInt(sessionData.year);
+        if (sessionData.weekNumber) sessionData.weekNumber = parseInt(sessionData.weekNumber);
 
         const session = new AttendanceSession(sessionData);
         await session.save();
@@ -65,7 +84,16 @@ const recordSession = async (req, res, next) => {
 
 const getHistory = async (req, res, next) => {
     try {
-        const filters = applyDistrictFilter(req, req.query);
+        const rawFilters = { ...req.query };
+
+        // Clean up empty strings from filters to prevent CastErrors
+        Object.keys(rawFilters).forEach(key => {
+            if (rawFilters[key] === '' || rawFilters[key] === 'null' || rawFilters[key] === 'undefined') {
+                delete rawFilters[key];
+            }
+        });
+
+        const filters = applyDistrictFilter(req, rawFilters);
 
         // Map snake_case to camelCase for DB query
         if (filters.week_number) {
@@ -166,9 +194,13 @@ const getAttendanceAnalytics = async (req, res, next) => {
 const getSchoolAttendanceReport = async (req, res, next) => {
     try {
         const { schoolId } = req.params;
-        const { month, weekNumber, term, semester, year } = req.query;
+        const { month, weekNumber, term, semester, year, schoolType } = req.query;
 
-        const sessionMatch = { schoolId: new mongoose.Types.ObjectId(schoolId) };
+        const sessionMatch = {};
+        if (schoolId && schoolId !== 'all' && schoolId !== 'null') {
+            sessionMatch.schoolId = new mongoose.Types.ObjectId(schoolId);
+        }
+
         if (month) sessionMatch.month = parseInt(month);
         if (weekNumber) sessionMatch.weekNumber = parseInt(weekNumber);
         if (year) sessionMatch.year = parseInt(year);
@@ -179,20 +211,25 @@ const getSchoolAttendanceReport = async (req, res, next) => {
             { $lookup: { from: 'attendancesessions', localField: 'sessionId', foreignField: '_id', as: 'session' } },
             { $unwind: "$session" },
             { $match: {
-                "session.schoolId": sessionMatch.schoolId,
-                ...(month && { "session.month": sessionMatch.month }),
-                ...(weekNumber && { "session.weekNumber": sessionMatch.weekNumber }),
-                ...(year && { "session.year": sessionMatch.year }),
-                ...(term && { "session.term": sessionMatch.term }),
-                ...(semester && { "session.semester": sessionMatch.semester })
+                ...(sessionMatch.schoolId && { "session.schoolId": sessionMatch.schoolId }),
+                ...(sessionMatch.month && { "session.month": sessionMatch.month }),
+                ...(sessionMatch.weekNumber && { "session.weekNumber": sessionMatch.weekNumber }),
+                ...(sessionMatch.year && { "session.year": sessionMatch.year }),
+                ...(sessionMatch.term && { "session.term": sessionMatch.term }),
+                ...(sessionMatch.semester && { "session.semester": sessionMatch.semester })
             }},
             { $lookup: { from: 'scholars', localField: 'scholarId', foreignField: '_id', as: 'scholar' } },
             { $unwind: "$scholar" },
-            { $match: { "scholar.status": "Active" } },
+            { $match: {
+                ...(schoolType && { "scholar.schoolType": new RegExp(`^${schoolType}$`, 'i') })
+            }},
             { $group: {
                 _id: "$scholarId",
                 scholar_name: { $first: "$scholar.fullName" },
                 age_id: { $first: "$scholar.scholarId" },
+                school_name: { $first: "$scholar.schoolName" },
+                school_type: { $first: "$scholar.schoolType" },
+                scholar_status: { $first: "$scholar.status" },
                 present_count: { $sum: { $cond: [{ $eq: ["$status", "present"] }, 1, 0] } },
                 total_sessions: { $sum: 1 }
             }},
@@ -230,10 +267,36 @@ const getSchoolAttendanceReport = async (req, res, next) => {
     }
 };
 
+const getScholarAttendanceHistory = async (req, res, next) => {
+    try {
+        const { scholarId } = req.params;
+        const { year, term, semester } = req.query;
+
+        const filter = { scholarId: new mongoose.Types.ObjectId(scholarId) };
+
+        const sessions = await Attendance.aggregate([
+            { $match: filter },
+            { $lookup: { from: 'attendancesessions', localField: 'sessionId', foreignField: '_id', as: 'session' } },
+            { $unwind: "$session" },
+            { $match: {
+                ...(year && { "session.year": parseInt(year) }),
+                ...(term && { "session.term": term }),
+                ...(semester && { "session.semester": semester })
+            }},
+            { $sort: { "session.sessionDate": -1 } }
+        ]);
+
+        return successResponse(res, sessions, 'Scholar attendance history retrieved.');
+    } catch (err) {
+        next(err);
+    }
+};
+
 module.exports = {
     recordSession,
     getHistory,
     getSessionById,
     getAttendanceAnalytics,
-    getSchoolAttendanceReport
+    getSchoolAttendanceReport,
+    getScholarAttendanceHistory
 };

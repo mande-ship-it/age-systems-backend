@@ -9,7 +9,7 @@ const eventSchema = new mongoose.Schema({
     location: { type: String },
     organizer: { type: String },
     attendees: [{
-        participantId: { type: mongoose.Schema.Types.ObjectId, refPath: 'attendees.participantType' },
+        participantId: { type: mongoose.Schema.Types.ObjectId, refPath: 'participantType' },
         participantType: { type: String, enum: ['Scholar', 'User'] }
     }],
     targetedParticipants: [{ type: String }],

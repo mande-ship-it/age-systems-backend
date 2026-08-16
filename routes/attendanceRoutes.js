@@ -6,7 +6,8 @@ const {
     getHistory,
     getSessionById,
     getAttendanceAnalytics,
-    getSchoolAttendanceReport
+    getSchoolAttendanceReport,
+    getScholarAttendanceHistory
 } = require('../controllers/attendanceController');
 
 const auth = require('../middleware/authMiddleware');
@@ -23,5 +24,8 @@ router.get('/session/:id', auth, getSessionById);
 
 // Recording Attendance (Marking Register)
 router.post('/record', auth, recordSession);
+
+// Individual Scholar History
+router.get('/scholar/:scholarId', auth, getScholarAttendanceHistory);
 
 module.exports = router;

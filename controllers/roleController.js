@@ -45,13 +45,22 @@ const getPermissionGroups = async (req, res, next) => {
 const createRole = async (req, res, next) => {
     try {
         const { name, description, icon, color, permissions } = req.body;
+        console.log('🛡️ Attempting to create role:', { name });
+
+        const existing = await Role.findOne({ name });
+        if (existing) {
+            return errorResponse(res, 'Role with this name already exists.', 400);
+        }
+
         const role = new Role({ name, description, icon, color, permissions });
         await role.save();
+        console.log('✅ Role created successfully:', role._id);
 
         await NotificationService.notifyAll(`🛡️ New Role created: ${name}`, 'info', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, role, 'Role created successfully.', 201);
     } catch (err) {
+        console.error('❌ createRole error:', err);
         next(err);
     }
 };

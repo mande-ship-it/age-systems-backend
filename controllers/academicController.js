@@ -10,14 +10,12 @@ const { evaluateProgression } = require('../utils/progressionEngine');
 
 const calculateGrade = (marks, isUniversity) => {
     if (isUniversity) {
-        if (marks >= 75) return { letter: 'A', point: 4.00 };
-        if (marks >= 70) return { letter: 'B+', point: 3.50 };
-        if (marks >= 65) return { letter: 'B', point: 3.00 };
-        if (marks >= 60) return { letter: 'C+', point: 2.50 };
-        if (marks >= 55) return { letter: 'C', point: 2.00 };
-        if (marks >= 50) return { letter: 'D', point: 1.00 };
-        return { letter: 'F', point: 0.00 };
+        if (marks >= 75) return { letter: 'Distinction', point: 4.00 };
+        if (marks >= 65) return { letter: 'Credit', point: 3.00 };
+        if (marks >= 50) return { letter: 'Pass', point: 2.00 };
+        return { letter: 'Fail', point: 0.00 };
     } else {
+        // MSCE standard
         if (marks >= 80) return { letter: 'Distinction', point: 1.0 };
         if (marks >= 75) return { letter: 'Distinction', point: 2.0 };
         if (marks >= 70) return { letter: 'Credit', point: 3.0 };
@@ -32,12 +30,19 @@ const calculateGrade = (marks, isUniversity) => {
 
 const recordResults = async (req, res, next) => {
     try {
-        const { scholarId, results, year, term, semester, schoolType } = req.body;
+        const { scholarId, results, year, term, semester, schoolType, currentClass } = req.body;
 
         const scholar = await Scholar.findById(scholarId);
         if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
         const isUniversity = (schoolType || scholar.schoolType) === 'University';
+        const targetClass = currentClass || scholar.currentClass;
+
+        if (!results || !Array.isArray(results) || results.length === 0) {
+            return errorResponse(res, 'No results provided for saving.', 400);
+        }
+
+        console.log(`[Academic] Recording ${results.length} results for ${scholar.fullName} | Class: ${targetClass} | Period: ${term || semester} | Year: ${year}`);
 
         const savedResults = [];
 
@@ -55,23 +60,50 @@ const recordResults = async (req, res, next) => {
 
             const graded = calculateGrade(resEntry.marks, isUniversity);
 
-            const filter = { scholarId, subjectId: subject._id, year };
+            // Logic for "Repeat" status (University only for now as requested)
+            let resultStatus = 'First Attempt';
+            if (isUniversity) {
+                const previousAttempt = await AcademicResult.findOne({
+                    scholarId,
+                    subjectId: subject._id,
+                    currentClass: targetClass,
+                    year: { $lt: year }
+                });
+                if (previousAttempt) {
+                    resultStatus = 'Repeat';
+                }
+            }
+
+            const filter = {
+                scholarId,
+                subjectId: subject._id,
+                year,
+                currentClass: targetClass
+            };
+
             if (isUniversity) filter.semester = semester; else filter.term = term;
 
             const update = {
                 marks: resEntry.marks,
                 gradeLetter: graded.letter,
-                gradePoint: graded.point
+                gradePoint: graded.point,
+                currentClass: targetClass,
+                status: resultStatus
             };
 
-            const record = await AcademicResult.findOneAndUpdate(filter, update, { upsert: true, new: true });
+            const record = await AcademicResult.findOneAndUpdate(filter, update, {
+                upsert: true,
+                new: true,
+                returnDocument: 'after' // Modern MongoDB/Mongoose option
+            });
             savedResults.push(record);
         }
 
         // Trigger progression evaluation (Spec Section 3)
-        await evaluateProgression(scholarId, year);
+        // Pass targetClass to evaluate specific class milestone
+        await evaluateProgression(scholarId, year, targetClass);
 
-        await NotificationService.notifyAll(`🎓 Academic results entered for ${scholar.fullName} (${year})`, 'success', req.user ? req.user.fullName : 'System');
+        await NotificationService.notifyAll(`🎓 Academic results entered for ${scholar.fullName} (${targetClass})`, 'success', req.user ? req.user.fullName : 'System');
 
         return successResponse(res, savedResults, `Successfully saved ${savedResults.length} result(s).`, 201);
     } catch (err) {
@@ -169,20 +201,44 @@ const getSchoolResults = async (req, res, next) => {
 const checkResultCompleteness = async (req, res, next) => {
     try {
         const { scholarId, year } = req.params;
-        const results = await AcademicResult.find({ scholarId, year: parseInt(year) });
+        const results = await AcademicResult.find({ scholarId, year: parseInt(year) }).populate('scholarId');
 
         const termsRecorded = [...new Set(results.map(r => r.term).filter(Boolean))];
         const semestersRecorded = [...new Set(results.map(r => r.semester).filter(Boolean))];
 
-        const scholar = await Scholar.findById(scholarId);
+        const scholar = results.length > 0 ? results[0].scholarId : await Scholar.findById(scholarId);
         const isUniversity = scholar && scholar.schoolType === 'University';
+
+        // Add class-specific logic for both secondary and university
+        const resultsByClass = {};
+        const failuresByClass = {};
+
+        results.forEach(r => {
+            const className = r.currentClass || scholar.currentClass;
+            if (!resultsByClass[className]) resultsByClass[className] = [];
+            if (!failuresByClass[className]) failuresByClass[className] = [];
+
+            const period = isUniversity ? r.semester : r.term;
+            if (period && !resultsByClass[className].includes(period)) {
+                resultsByClass[className].push(period);
+            }
+
+            // Failure detection (Threshold 50 for Uni, 50 for Sec in this engine)
+            if (r.marks < 50) {
+                if (period && !failuresByClass[className].includes(period)) {
+                    failuresByClass[className].push(period);
+                }
+            }
+        });
 
         const isComplete = isUniversity ? semestersRecorded.length === 2 : termsRecorded.length === 3;
 
         return successResponse(res, {
             isComplete,
             termsRecorded,
-            semestersRecorded
+            semestersRecorded,
+            resultsByClass,
+            failuresByClass
         });
     } catch (err) {
         next(err);

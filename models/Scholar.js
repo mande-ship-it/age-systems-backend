@@ -68,6 +68,9 @@ scholarSchema.pre('save', async function() {
     // Standardize input
     if (this.fullName) this.fullName = this.fullName.trim();
     if (this.scholarId) this.scholarId = this.scholarId.trim();
+    if (this.currentClass) this.currentClass = this.currentClass.trim();
+    if (this.academicYear) this.academicYear = this.academicYear.trim();
+    if (this.registeredClass) this.registeredClass = this.registeredClass.trim();
 
     if (this.isNew && !this.scholarId) {
         console.log('[DEBUG] Generating unique scholarId...');

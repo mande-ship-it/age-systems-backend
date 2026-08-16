@@ -7,8 +7,10 @@ const academicResultSchema = new mongoose.Schema({
     gradeLetter: { type: String },
     gradePoint: { type: Number },
     year: { type: Number, required: true },
+    currentClass: { type: String }, // e.g. Form 1, Year 1
     term: { type: String }, // For Secondary: Term 1, 2, 3
     semester: { type: String }, // For University: Semester 1, 2
+    status: { type: String, enum: ['First Attempt', 'Repeat'], default: 'First Attempt' },
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now }
 }, {
@@ -17,7 +19,7 @@ const academicResultSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-// Ensure unique index for scholar, subject, year, and term/semester
-academicResultSchema.index({ scholarId: 1, subjectId: 1, year: 1, term: 1, semester: 1 }, { unique: true });
+// Ensure unique index for scholar, subject, class, year, and term/semester
+academicResultSchema.index({ scholarId: 1, subjectId: 1, currentClass: 1, year: 1, term: 1, semester: 1 }, { unique: true });
 
 module.exports = mongoose.model('AcademicResult', academicResultSchema);

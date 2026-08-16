@@ -49,9 +49,9 @@ const getUserById = async (req, res, next) => {
 
 const createUser = async (req, res, next) => {
     try {
-        const { email, username, fullName, roleName, departmentName, departmentId, password } = req.body;
+        const { email, username, fullName, roleName, roleId, departmentName, departmentId, password } = req.body;
 
-        console.log('Attempting to create user:', { email, username, roleName, departmentId });
+        console.log('👤 Attempting to create user:', { email, username, roleName, roleId, departmentId });
 
         const existing = await User.findOne({
             $or: [
@@ -61,22 +61,24 @@ const createUser = async (req, res, next) => {
         });
 
         if (existing) {
-            console.log('User creation failed: User already exists');
+            console.log('❌ User creation failed: User already exists');
             return errorResponse(res, 'A user with this email or username already exists.', 400);
         }
 
         // Resolve Role
-        let role;
-        if (roleName) {
-            role = await Role.findOne({ name: roleName });
+        let finalRole;
+        if (roleId && mongoose.Types.ObjectId.isValid(roleId)) {
+            finalRole = await Role.findById(roleId);
+        } else if (roleName) {
+            finalRole = await Role.findOne({ name: roleName });
         }
 
         // Resolve Department
-        let dept;
+        let finalDept;
         if (departmentId && mongoose.Types.ObjectId.isValid(departmentId)) {
-            dept = await Department.findById(departmentId);
+            finalDept = await Department.findById(departmentId);
         } else if (departmentName) {
-            dept = await Department.findOne({ name: departmentName });
+            finalDept = await Department.findOne({ name: departmentName });
         }
 
         const tempPassword = password || Math.random().toString(36).slice(-8);
@@ -85,33 +87,33 @@ const createUser = async (req, res, next) => {
         const otpExpiry = new Date();
         otpExpiry.setHours(otpExpiry.getHours() + 48);
 
-        const user = new User({
+        const userData = {
             ...req.body,
             email: email.toLowerCase(),
             username: username.toLowerCase(),
             passwordHash,
-            roleId: role?._id,
-            departmentId: dept?._id,
-            assignedDistrict: req.body.assignedDistrict,
+            roleId: finalRole ? finalRole._id : null,
+            departmentId: finalDept ? finalDept._id : null,
+            isFirstLogin: true,
             otpCode,
-            otpExpiry,
-            isFirstLogin: true
-        });
+            otpExpiry
+        };
 
+        const user = new User(userData);
         await user.save();
-        console.log('User created successfully:', user._id);
+        console.log('✅ User created successfully:', user._id);
 
         // Email logic...
         try {
-            await sendOTP(user, otpCode, tempPassword, roleName);
+            await sendOTP(user, otpCode, tempPassword, finalRole ? finalRole.name : 'Staff');
         } catch (e) {
-            console.error('Failed to send OTP email:', e.message);
+            console.error('⚠️ Failed to send OTP email:', e.message);
         }
 
         await NotificationService.notifyAll(`👤 New User: ${fullName}`, 'success', req.user ? req.user.fullName : 'System');
         return successResponse(res, { user, temp_password: tempPassword }, 'User created successfully.', 201);
     } catch (err) {
-        console.error('createUser error:', err);
+        console.error('❌ createUser error:', err);
         next(err);
     }
 };

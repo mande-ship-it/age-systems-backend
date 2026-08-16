@@ -210,8 +210,16 @@ const deleteScholar = async (req, res, next) => {
         const scholar = await Scholar.findByIdAndDelete(id);
         if (!scholar) return errorResponse(res, 'Scholar not found.', 404);
 
+        // Cascading deletion of all associated data
+        await Promise.all([
+            AcademicResult.deleteMany({ scholarId: id }),
+            Attendance.deleteMany({ scholarId: id }),
+            Document.deleteMany({ scholarId: id }),
+            Internship.deleteMany({ scholarId: id })
+        ]);
+
         await NotificationService.notifyAll(`🗑️ Scholar removed: ${scholar.fullName}`, 'warning', req.user ? req.user.fullName : 'System');
-        return successResponse(res, { id });
+        return successResponse(res, { id }, 'Scholar and all associated records deleted.');
     } catch (err) {
         next(err);
     }

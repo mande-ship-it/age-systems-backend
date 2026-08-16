@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: scholar-management-api
+    name: age-systems-backend
     runtime: node
     plan: free
     buildCommand: npm install

@@ -20,23 +20,22 @@ const getAllEvents = async (req, res, next) => {
 
 const createEvent = async (req, res, next) => {
     try {
-        const { attendees, ...rest } = req.body;
+        const { attendees, targetedParticipants, ...rest } = req.body;
         const eventData = { ...rest };
 
         // Map frontend fields to model fields if necessary
         if (req.body.date && !eventData.eventDate) eventData.eventDate = req.body.date;
         if (req.body.time && !eventData.eventTime) eventData.eventTime = req.body.time;
 
-        if (attendees) {
-            eventData.attendees = attendees;
-        }
+        if (attendees) eventData.attendees = attendees;
+        if (targetedParticipants) eventData.targetedParticipants = targetedParticipants;
 
         const event = new Event(eventData);
         await event.save();
 
-        // Send Email Notifications
+        // Send Email Notifications in parallel (background)
         if (attendees && attendees.length > 0) {
-            for (const attendee of attendees) {
+            const emailPromises = attendees.map(async (attendee) => {
                 try {
                     let participant;
                     if (attendee.participantType === 'Scholar') {
@@ -46,21 +45,27 @@ const createEvent = async (req, res, next) => {
                     }
 
                     if (participant && participant.email) {
-                        await sendEventNotificationEmail({
+                        return sendEventNotificationEmail({
                             email: participant.email,
                             name: participant.fullName || participant.full_name,
                             event: event
                         });
                     }
-                } catch (emailErr) {
-                    console.error(`Failed to send event email to ${attendee.participantId}:`, emailErr.message);
+                } catch (err) {
+                    console.error(`Error processing attendee ${attendee.participantId}:`, err.message);
                 }
-            }
+            });
+
+            // Don't await individual emails inside the request cycle to keep UI fast
+            Promise.allSettled(emailPromises).then(results => {
+                const successful = results.filter(r => r.status === 'fulfilled' && r.value).length;
+                console.log(`✅ Event Invitations: ${successful}/${attendees.length} emails dispatched.`);
+            });
         }
 
-        await NotificationService.notifyAll(`📅 New Event: "${event.title}" created and invitations sent.`, 'info', req.user ? req.user.fullName : 'System');
+        await NotificationService.notifyAll(`📅 New Event: "${event.title}" scheduled for ${new Date(event.eventDate).toDateString()}`, 'info', req.user ? req.user.fullName : 'System');
 
-        return successResponse(res, event, 'Event created and invitations synchronized.', 201);
+        return successResponse(res, event, 'Event created and invitations are being dispatched.', 201);
     } catch (err) {
         next(err);
     }
